@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>AR Offline - واقعیت افزوده</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: Tahoma, sans-serif; color: #fff; touch-action: none; }
+  #video { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; background: #000; }
+  #canvas { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 2; display: block; }
+  #ui { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; background: rgba(0,0,0,0.85); padding: 20px; }
+  .btn { margin: 8px; padding: 14px; font-size: 15px; font-weight: bold; font-family: inherit; color: #fff; background: #2979ff; border: none; border-radius: 30px; width: 100%; max-width: 300px; transition: 0.2s; }
+  .btn:active { transform: scale(0.95); }
+  .btn-success { background: #00c853 !important; }
+  .btn-error { background: #d50000 !important; }
+  .btn-start { background: #ff3d00; margin-top: 20px; }
+  #status { margin-top: 20px; font-size: 14px; text-align: center; color: #b0bec5; min-height: 2em; }
+  #hint { position: fixed; bottom: 8%; left: 50%; transform: translateX(-50%); z-index: 15; padding: 10px 20px; border-radius: 20px; background: rgba(0,0,0,0.7); color: #80d8ff; font-size: 14px; display: none; opacity: 0; transition: opacity 0.5s; }
+</style>
+</head>
+<body>
+  <video id="video" playsinline autoplay muted></video>
+  <canvas id="canvas"></canvas>
+  <div id="hint"></div>
+  <div id="ui">
+    <button id="btn-camera" class="btn">۱. درخواست مجوز دوربین</button>
+    <button id="btn-sensor" class="btn">۲. درخواست مجوز سنسور</button>
+    <button id="btn-start" class="btn btn-start">۳. شروع تجربه</button>
+    <div id="status">لطفاً مجوزها را به ترتیب اعطا کنید.</div>
+  </div>
+<script>
+(function() {
+  'use strict';
+  var video = document.getElementById('video'), canvas = document.getElementById('canvas');
+  var ui = document.getElementById('ui'), statusEl = document.getElementById('status'), hintEl = document.getElementById('hint');
+  var gl = null, progLit = null, progSolid = null, litLocs = null, solidLocs = null;
+  var objects = [], gridBuf = null, gridCount = 0, rafId = null, lastTime = 0, running = false;
+  var hasCamera = false, sensorActive = false, sensorData = { alpha: 0, beta: 0, gamma: 0 };
+  var yaw = 0, pitch = 0, dragging = false, lastX = 0, lastY = 0, SENS = 0.005, MAX_PITCH = Math.PI / 2 - 0.02;
+  var M_APP_TO_EARTH = new Float32Array([1,0,0,0, 0,0,1,0, 0,-1,0,0, 0,0,0,1]);
+
+  function mat4Mul(a,b){var o=new Float32Array(16);for(var c=0;c<4;c++)for(var r=0;r<4;r++){var s=0;for(var k=0;k<4;k++)s+=a[k*4+r]*b[c*4+k];o[c*4+r]=s;}return o;}
+  function mat4Transpose(m){var o=new Float32Array(16);for(var r=0;r<4;r++)for(var c=0;c<4;c++)o[c*4+r]=m[r*4+c];return o;}
+  function mat4Translate(x,y,z){return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);}
+  function mat4RotX(a){var c=Math.cos(a),s=Math.sin(a);return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);}
+  function mat4RotY(a){var c=Math.cos(a),s=Math.sin(a);return new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]);}
+  function mat4RotZ(a){var c=Math.cos(a),s=Math.sin(a);return new Float32Array([c,s,0,0, -s,c,0,0, 0,0,1,0, 0,0,0,1]);}
+  function mat4Scale(s){return new Float32Array([s,0,0,0, 0,s,0,0, 0,0,s,0, 0,0,0,1]);}
+  function mat4Compose(p,ry,rx,s){var m=mat4Translate(p[0],p[1],p[2]);m=mat4Mul(m,mat4RotY(ry));m=mat4Mul(m,mat4RotX(rx));m=mat4Mul(m,mat4Scale(s));return m;}
+  function mat4Perspective(f,a,n,fa){var t=1.0/Math.tan((f/2)*Math.PI/180);return new Float32Array([t/a,0,0,0, 0,t,0,0, 0,0,(fa+n)/(n-fa),-1, 0,0,(2*fa*n)/(n-fa),0]);}
+
+  function makeCube(){var p=0.5,pos=[],nor=[];var f=[[[0,0,1],[[-p,-p,p],[p,-p,p],[p,p,p],[-p,-p,p],[p,p,p],[-p,p,p]]],[[0,0,-1],[[p,-p,-p],[-p,-p,-p],[-p,p,-p],[p,-p,-p],[-p,p,-p],[p,p,-p]]],[[1,0,0],[[p,-p,p],[p,-p,-p],[p,p,-p],[p,-p,p],[p,p,-p],[p,p,p]]],[[-1,0,0],[[-p,-p,-p],[-p,-p,p],[-p,p,p],[-p,-p,-p],[-p,p,p],[-p,p,-p]]],[[0,1,0],[[-p,p,p],[p,p,p],[p,p,-p],[-p,p,p],[p,p,-p],[-p,p,-p]]],[[0,-1,0],[[-p,-p,-p],[p,-p,-p],[p,-p,p],[-p,-p,-p],[p,-p,p],[-p,-p,p]]]];for(var i=0;i<f.length;i++)for(var j=0;j<6;j++){pos.push(f[i][1][j][0],f[i][1][j][1],f[i][1][j][2]);nor.push(f[i][0][0],f[i][0][1],f[i][0][2]);}return{positions:new Float32Array(pos),normals:new Float32Array(nor)};}
+  function makeSphere(r,ls,lo){var pos=[],nor=[];function pt(t,p){var st=Math.sin(t),ct=Math.cos(t),sp=Math.sin(p),cp=Math.cos(p);return{x:r*st*cp,y:r*ct,z:r*st*sp,nx:st*cp,ny:ct,nz:st*sp};}for(var i=0;i<ls;i++){var t0=i*Math.PI/ls,t1=(i+1)*Math.PI/ls;for(var j=0;j<lo;j++){var p0=j*2*Math.PI/lo,p1=(j+1)*2*Math.PI/lo;var a=pt(t0,p0),b=pt(t1,p0),c=pt(t0,p1),d=pt(t1,p1);pos.push(a.x,a.y,a.z,b.x,b.y,b.z,c.x,c.y,c.z);nor.push(a.nx,a.ny,a.nz,b.nx,b.ny,b.nz,c.nx,c.ny,c.nz);pos.push(c.x,c.y,c.z,b.x,b.y,b.z,d.x,d.y,d.z);nor.push(c.nx,c.ny,c.nz,b.nx,b.ny,b.nz,d.nx,d.ny,d.nz);}}return{positions:new Float32Array(pos),normals:new Float32Array(nor)};}
+  function makeTorus(R,r,sr,st){var pos=[],nor=[];function pt(p,t){var cp=Math.cos(p),sp=Math.sin(p),ct=Math.cos(t),st=Math.sin(t);return{x:(R+r*ct)*cp,y:r*st,z:(R+r*ct)*sp,nx:ct*cp,ny:st,nz:ct*sp};}for(var i=0;i<sr;i++){var p0=i/sr*Math.PI*2,p1=(i+1)/sr*Math.PI*2;for(var j=0;j<st;j++){var t0=j/st*Math.PI*2,t1=(j+1)/st*Math.PI*2;var a=pt(p0,t0),b=pt(p1,t0),c=pt(p0,t1),d=pt(p1,t1);pos.push(a.x,a.y,a.z,b.x,b.y,b.z,c.x,c.y,c.z);nor.push(a.nx,a.ny,a.nz,b.nx,b.ny,b.nz,c.nx,c.ny,c.nz);pos.push(c.x,c.y,c.z,b.x,b.y,b.z,d.x,d.y,d.z);nor.push(c.nx,c.ny,c.nz,b.nx,b.ny,b.nz,d.nx,d.ny,d.nz);}}return{positions:new Float32Array(pos),normals:new Float32Array(nor)};}
+  function makeCone(r,h,seg){var pos=[],nor=[],hh=h/2,len=Math.sqrt(h*h+r*r);for(var i=0;i<seg;i++){var a0=i/seg*Math.PI*2,a1=(i+1)/seg*Math.PI*2;var c0=Math.cos(a0),s0=Math.sin(a0),c1=Math.cos(a1),s1=Math.sin(a1);var b0=[r*c0,-hh,r*s0],b1=[r*c1,-hh,r*s1],tip=[0,hh,0];var n0=[c0*h/len,r/len,s0*h/len],n1=[c1*h/len,r/len,s1*h/len];var nx=(n0[0]+n1[0])/2,ny=r/len,nz=(n0[2]+n1[2])/2,nl=Math.sqrt(nx*nx+ny*ny+nz*nz);nx/=nl;ny/=nl;nz/=nl;pos.push(b0[0],b0[1],b0[2],tip[0],tip[1],tip[2],b1[0],b1[1],b1[2]);nor.push(n0[0],n0[1],n0[2],nx,ny,nz,n1[0],n1[1],n1[2]);}for(var k=0;k<seg;k++){var g0=k/seg*Math.PI*2,g1=(k+1)/seg*Math.PI*2;var q0=[r*Math.cos(g0),-hh,r*Math.sin(g0)],q1=[r*Math.cos(g1),-hh,r*Math.sin(g1)];pos.push(0,-hh,0,q1[0],q1[1],q1[2],q0[0],q0[1],q0[2]);nor.push(0,-1,0,0,-1,0,0,-1,0);}return{positions:new Float32Array(pos),normals:new Float32Array(nor)};}
+  function makeGrid(sz,div,y){var pos=[],st=sz/div,half=sz/2;for(var i=0;i<=div;i++){var t=-half+i*st;pos.push(-half,y,t,half,y,t,t,y,-half,t,y,half);}return new Float32Array(pos);}
+
+  var VS_LIT='attribute vec3 aPos;attribute vec3 aNormal;uniform mat4 uMVP;uniform mat4 uModel;varying vec3 vNormal;varying vec3 vWorldPos;void main(){vNormal=mat3(uModel)*aNormal;vWorldPos=(uModel*vec4(aPos,1.0)).xyz;gl_Position=uMVP*vec4(aPos,1.0);}';
+  var FS_LIT='precision mediump float;varying vec3 vNormal;varying vec3 vWorldPos;uniform vec3 uColor;uniform vec3 uLightDir;uniform vec3 uEyePos;uniform float uEmissive;void main(){vec3 N=normalize(vNormal);vec3 L=normalize(uLightDir);vec3 V=normalize(uEyePos-vWorldPos);vec3 H=normalize(L+V);float diff=max(dot(N,L),0.0);float spec=pow(max(dot(N,H),0.0),40.0);vec3 base=uColor*(0.35+0.75*diff)+vec3(1.0)*spec*0.6;base=mix(base,uColor*1.4+0.05,uEmissive);gl_FragColor=vec4(base,1.0);}';
+  var VS_SOLID='attribute vec3 aPos;uniform mat4 uMVP;void main(){gl_Position=uMVP*vec4(aPos,1.0);}';
+  var FS_SOLID='precision mediump float;uniform vec4 uColor;void main(){gl_FragColor=vec4(uColor.rgb*uColor.a,uColor.a);}';
+
+  function compileShader(c,t,s){var sh=c.createShader(t);c.shaderSource(sh,s);c.compileShader(sh);if(!c.getShaderParameter(sh,c.COMPILE_STATUS))throw new Error(c.getShaderInfoLog(sh));return sh;}
+  function createProgram(c,vs,fs){var p=c.createProgram();c.attachShader(p,compileShader(c,c.VERTEX_SHADER,vs));c.attachShader(p,compileShader(c,c.FRAGMENT_SHADER,fs));c.linkProgram(p);if(!c.getProgramParameter(p,c.LINK_STATUS))throw new Error(c.getProgramInfoLog(p));return p;}
+  function createMesh(c,g){var pb=c.createBuffer();c.bindBuffer(c.ARRAY_BUFFER,pb);c.bufferData(c.ARRAY_BUFFER,g.positions,c.STATIC_DRAW);var nb=c.createBuffer();c.bindBuffer(c.ARRAY_BUFFER,nb);c.bufferData(c.ARRAY_BUFFER,g.normals,c.STATIC_DRAW);return{posBuf:pb,norBuf:nb,count:g.positions.length/3};}
+
+  function setupGL(){var opt={alpha:true,antialias:true,premultipliedAlpha:true,depth:true};gl=canvas.getContext('webgl',opt)||canvas.getContext('experimental-webgl',opt);if(!gl)throw new Error('WebGL not supported');progLit=createProgram(gl,VS_LIT,FS_LIT);litLocs={aPos:gl.getAttribLocation(progLit,'aPos'),aNormal:gl.getAttribLocation(progLit,'aNormal'),uMVP:gl.getUniformLocation(progLit,'uMVP'),uModel:gl.getUniformLocation(progLit,'uModel'),uColor:gl.getUniformLocation(progLit,'uColor'),uLightDir:gl.getUniformLocation(progLit,'uLightDir'),uEyePos:gl.getUniformLocation(progLit,'uEyePos'),uEmissive:gl.getUniformLocation(progLit,'uEmissive')};progSolid=createProgram(gl,VS_SOLID,FS_SOLID);solidLocs={aPos:gl.getAttribLocation(progSolid,'aPos'),uMVP:gl.getUniformLocation(progSolid,'uMVP'),uColor:gl.getUniformLocation(progSolid,'uColor')};}
+  function buildScene(){objects=[];objects.push({mesh:createMesh(gl,makeCube()),position:[1.8,0.2,-2.5],rotY:0.3,rotX:0.2,rotSpeedY:0.7,rotSpeedX:0.3,color:[1,0.32,0.32],emissive:0.15});objects.push({mesh:createMesh(gl,makeSphere(0.35,24,32)),position:[-1.6,0.6,-2.2],rotY:0,rotX:0,rotSpeedY:-0.5,rotSpeedX:0.4,color:[0.27,0.54,1],emissive:0.15});objects.push({mesh:createMesh(gl,makeTorus(0.45,0.15,32,48)),position:[0.5,0.3,-3.5],rotY:0,rotX:Math.PI/4,rotSpeedY:0.6,rotSpeedX:0.2,color:[1,0.84,0.25],emissive:0.2});objects.push({mesh:createMesh(gl,makeCone(0.38,0.75,32)),position:[-2.5,0.1,-4],rotY:0,rotX:0,rotSpeedY:0.5,rotSpeedX:0.15,color:[0.41,0.94,0.68],emissive:0.15});gridBuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,gridBuf);var g=makeGrid(14,28,-1.4);gl.bufferData(gl.ARRAY_BUFFER,g,gl.STATIC_DRAW);gridCount=g.length/3;}
+
+  function onOrient(e){if(e.alpha===null||e.beta===null||e.gamma===null)return;sensorData.alpha=e.alpha;sensorData.beta=e.beta;sensorData.gamma=e.gamma;if(!sensorActive){sensorActive=true;hintEl.textContent='گوشی را در فضا بچرخانید';}}
+  function screenAngle(){var d=(screen.orientation&&screen.orientation.angle)||window.orientation||0;return(((d%360)+360)%360)*Math.PI/180;}
+  function sensorView(){var d=Math.PI/180;var R=mat4Mul(mat4RotZ(sensorData.alpha*d),mat4Mul(mat4RotX(sensorData.beta*d),mat4RotY(sensorData.gamma*d)));return mat4Mul(mat4RotZ(screenAngle()),mat4Mul(mat4Transpose(R),M_APP_TO_EARTH));}
+  function touchView(){return mat4Mul(mat4RotX(-pitch),mat4RotY(-yaw));}
+
+  function render(time){rafId=requestAnimationFrame(render);if(!gl)return;var t=time*0.001,dt=lastTime?Math.min(t-lastTime,0.1):0;lastTime=t;gl.viewport(0,0,canvas.width,canvas.height);gl.clearColor(0,0,0,0);gl.clearDepth(1);gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.disable(gl.CULL_FACE);gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);for(var i=0;i<objects.length;i++){var o=objects[i];o.rotY+=o.rotSpeedY*dt;o.rotX+=o.rotSpeedX*dt;o.matrix=mat4Compose(o.position,o.rotY,o.rotX,1);}var view=sensorActive?sensorView():touchView();var proj=mat4Perspective(70,canvas.width/Math.max(1,canvas.height),0.1,100);var vp=mat4Mul(proj,view);gl.useProgram(progSolid);gl.uniformMatrix4fv(solidLocs.uMVP,false,vp);gl.uniform4fv(solidLocs.uColor,[0,0.9,1,0.35]);gl.depthMask(false);gl.bindBuffer(gl.ARRAY_BUFFER,gridBuf);gl.enableVertexAttribArray(solidLocs.aPos);gl.vertexAttribPointer(solidLocs.aPos,3,gl.FLOAT,false,0,0);gl.drawArrays(gl.LINES,0,gridCount);gl.depthMask(true);gl.useProgram(progLit);for(var j=0;j<objects.length;j++){var ob=objects[j];gl.uniformMatrix4fv(litLocs.uMVP,false,mat4Mul(vp,ob.matrix));gl.uniformMatrix4fv(litLocs.uModel,false,ob.matrix);gl.uniform3fv(litLocs.uColor,ob.color);gl.uniform3fv(litLocs.uLightDir,[0.5,0.8,0.6]);gl.uniform3fv(litLocs.uEyePos,[0,0,0]);gl.uniform1f(litLocs.uEmissive,ob.emissive);gl.bindBuffer(gl.ARRAY_BUFFER,ob.mesh.posBuf);gl.enableVertexAttribArray(litLocs.aPos);gl.vertexAttribPointer(litLocs.aPos,3,gl.FLOAT,false,0,0);gl.bindBuffer(gl.ARRAY_BUFFER,ob.mesh.norBuf);gl.enableVertexAttribArray(litLocs.aNormal);gl.vertexAttribPointer(litLocs.aNormal,3,gl.FLOAT,false,0,0);gl.drawArrays(gl.TRIANGLES,0,ob.mesh.count);}}
+
+  function resize(){var d=Math.min(window.devicePixelRatio||1,2);canvas.width=Math.round(window.innerWidth*d);canvas.height=Math.round(window.innerHeight*d);canvas.style.width=window.innerWidth+'px';canvas.style.height=window.innerHeight+'px';}
+  function onDown(e){if(sensorActive)return;dragging=true;lastX=e.clientX;lastY=e.clientY;}
+  function onMove(e){if(!dragging||sensorActive)return;var dx=e.clientX-lastX,dy=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;yaw-=dx*SENS;pitch=Math.max(-MAX_PITCH,Math.min(MAX_PITCH,pitch-dy*SENS));}
+  function onUp(){dragging=false;}
+
+  document.getElementById('btn-camera').onclick=function(){var b=this;if(!window.isSecureContext){statusEl.textContent='دسترسی فقط در HTTPS ممکن است.';return;}navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}}).catch(function(err){if(err.name==='OverconstrainedError'||err.name==='NotFoundError')return navigator.mediaDevices.getUserMedia({video:true});throw err;}).then(function(s){video.srcObject=s;video.play().catch(function(){});video.style.display='block';hasCamera=true;b.classList.add('btn-success');b.textContent='✓ دوربین متصل شد';statusEl.textContent='حالا مجوز سنسور را بدهید.';}).catch(function(err){b.classList.add('btn-error');statusEl.textContent='خطا: '+(err.name==='NotAllowedError'?'اجازه دسترسی رد شد.':err.message);});};
+  document.getElementById('btn-sensor').onclick=function(){var b=this;function listen(){window.addEventListener('deviceorientation',onOrient,true);setTimeout(function(){if(!sensorActive)statusEl.textContent='سنسور داده‌ای نفرستاد. از لمس استفاده کنید.';},2500);}if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'){DeviceOrientationEvent.requestPermission().then(function(p){if(p==='granted'){b.classList.add('btn-success');b.textContent='✓ سنسور متصل شد';statusEl.textContent='سنسور فعال شد.';listen();}else{b.classList.add('btn-error');statusEl.textContent='اجازه سنسور داده نشد.';}}).catch(function(){b.classList.add('btn-error');statusEl.textContent='خطا در درخواست سنسور.';});}else{b.classList.add('btn-success');b.textContent='✓ سنسور متصل شد';statusEl.textContent='سنسور فعال شد.';listen();}};
+  document.getElementById('btn-start').onclick=function(){try{if(!gl){setupGL();buildScene();}resize();window.addEventListener('resize',resize);canvas.addEventListener('pointerdown',onDown,{passive:true});canvas.addEventListener('pointermove',onMove,{passive:true});canvas.addEventListener('pointerup',onUp,{passive:true});canvas.addEventListener('pointercancel',onUp,{passive:true});ui.style.display='none';hintEl.style.display='block';hintEl.textContent=sensorActive?'گوشی را بچرخانید':'برای چرخش انگشت خود را بکشید';requestAnimationFrame(function(){hintEl.style.opacity='1';});setTimeout(function(){hintEl.style.opacity='0';},6000);lastTime=0;rafId=requestAnimationFrame(render);}catch(err){ui.style.display='flex';statusEl.textContent='خطا: '+err.message;}};
+})();
+</script>
+</body>
+</html>
