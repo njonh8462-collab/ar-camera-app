@@ -14,28 +14,30 @@
   .btn:active { transform: scale(0.95); }
   .btn-start { background: #ff3d00; margin-top: 20px; font-size: 20px; padding: 18px 50px; }
   #status { margin-top: 20px; font-size: 15px; text-align: center; color: #b0bec5; min-height: 2em; line-height: 1.6; }
-  #hint { position: fixed; bottom: 10%; left: 50%; transform: translateX(-50%); z-index: 15; padding: 12px 24px; border-radius: 30px; background: rgba(0,0,0,0.75); color: #80d8ff; font-size: 15px; text-align: center; pointer-events: none; display: none; opacity: 0; transition: opacity 0.5s; }
+  #hint { position: fixed; top: 10%; left: 50%; transform: translateX(-50%); z-index: 15; padding: 12px 24px; border-radius: 30px; background: rgba(0,0,0,0.75); color: #80d8ff; font-size: 15px; text-align: center; pointer-events: none; display: none; opacity: 0; transition: opacity 0.5s; }
+  
+  /* استایل جوی‌استیک مجازی */
+  #joystick-zone { position: fixed; bottom: 20px; left: 20px; width: 130px; height: 130px; z-index: 20; display: none; touch-action: none; }
+  #joystick-base { position: absolute; width: 100%; height: 100%; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; }
+  #joystick-knob { position: absolute; top: 35px; left: 35px; width: 60px; height: 60px; background: rgba(41,121,255,0.8); border-radius: 50%; box-shadow: 0 0 10px rgba(41,121,255,0.5); }
   #error-box { position: fixed; top: 0; left: 0; right: 0; background: #d50000; color: #fff; padding: 15px; font-family: monospace; direction: ltr; text-align: left; z-index: 9999; display: none; word-wrap: break-word; font-size: 13px; }
 </style>
 </head>
 <body>
   <div id="error-box"></div>
-  <script>
-    window.onerror = function(msg, url, line) {
-      var box = document.getElementById('error-box');
-      box.style.display = 'block';
-      box.innerHTML += 'Error: ' + msg + ' (Line ' + line + ')<br>';
-      return false;
-    };
-  </script>
-
   <video id="video" playsinline autoplay muted></video>
   <canvas id="canvas"></canvas>
   <div id="hint"></div>
+  
   <div id="ui">
     <h2 style="margin-bottom:20px;">تجربه واقعیت افزوده</h2>
     <button id="btn-start" class="btn btn-start">شروع</button>
     <div id="status">برای شروع دکمه بالا را بزنید.</div>
+  </div>
+
+  <div id="joystick-zone">
+    <div id="joystick-base"></div>
+    <div id="joystick-knob"></div>
   </div>
 
 <script>
@@ -43,16 +45,24 @@
   'use strict';
   var video = document.getElementById('video'), canvas = document.getElementById('canvas');
   var ui = document.getElementById('ui'), statusEl = document.getElementById('status'), hintEl = document.getElementById('hint');
-  var gl = null, isXR = false, xrSession = null, xrRefSpace = null, xrViewerSpace = null, xrHitTestSource = null;
+  var gl = null, isXR = false, xrSession = null, xrRefSpace = null;
   var progLit = null, litLocs = null, objects = [], gridBuf = null, gridCount = 0;
   var rafId = null, lastTime = 0;
 
-  // متغیرهای حالت پشتیبان (Fallback)
-  var sensorActive = false, sensorData = { alpha: 0, beta: 0, gamma: 0 };
-  var yaw = 0, pitch = 0, dragging = false, lastX = 0, lastY = 0, SENS = 0.005, MAX_PITCH = Math.PI / 2 - 0.02;
+  // متغیرهای حالت پشتیبان
+  var sensorActive = false;
+  var smoothAlpha = 0, smoothBeta = 0, smoothGamma = 0;
+  var camX = 0, camY = -1.6, camZ = 0; // موقعیت دوربین در فضا
+  var pitch = 0, yaw = 0, dragging = false, lastX = 0, lastY = 0;
   var M_APP_TO_EARTH = new Float32Array([1,0,0,0, 0,0,1,0, 0,-1,0,0, 0,0,0,1]);
 
-  // ==================== ریاضیات ماتریس ====================
+  // متغیرهای جوی‌استیک
+  var joyActive = false, joyX = 0, joyY = 0;
+  var joyZone = document.getElementById('joystick-zone');
+  var joyKnob = document.getElementById('joystick-knob');
+  var joyCenter = { x: 0, y: 0 };
+
+  // ==================== ریاضیات ====================
   function mat4Mul(a,b){var o=new Float32Array(16);for(var c=0;c<4;c++)for(var r=0;r<4;r++){var s=0;for(var k=0;k<4;k++)s+=a[k*4+r]*b[c*4+k];o[c*4+r]=s;}return o;}
   function mat4Transpose(m){var o=new Float32Array(16);for(var r=0;r<4;r++)for(var c=0;c<4;c++)o[c*4+r]=m[r*4+c];return o;}
   function mat4Translate(x,y,z){return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);}
@@ -63,7 +73,7 @@
   function mat4Compose(p,ry,rx,s){var m=mat4Translate(p[0],p[1],p[2]);m=mat4Mul(m,mat4RotY(ry));m=mat4Mul(m,mat4RotX(rx));m=mat4Mul(m,mat4Scale(s));return m;}
   function mat4Perspective(f,a,n,fa){var t=1.0/Math.tan((f/2)*Math.PI/180);return new Float32Array([t/a,0,0,0, 0,t,0,0, 0,0,(fa+n)/(n-fa),-1, 0,0,(2*fa*n)/(n-fa),0]);}
 
-  // ==================== احجام هندسی ====================
+  // ==================== هندسه ====================
   function makeCube(){var p=0.5,pos=[],nor=[];var f=[[[0,0,1],[[-p,-p,p],[p,-p,p],[p,p,p],[-p,-p,p],[p,p,p],[-p,p,p]]],[[0,0,-1],[[p,-p,-p],[-p,-p,-p],[-p,p,-p],[p,-p,-p],[-p,p,-p],[p,p,-p]]],[[1,0,0],[[p,-p,p],[p,-p,-p],[p,p,-p],[p,-p,p],[p,p,-p],[p,p,p]]],[[-1,0,0],[[-p,-p,-p],[-p,-p,p],[-p,p,p],[-p,-p,-p],[-p,p,p],[-p,p,-p]]],[[0,1,0],[[-p,p,p],[p,p,p],[p,p,-p],[-p,p,p],[p,p,-p],[-p,p,-p]]],[[0,-1,0],[[-p,-p,-p],[p,-p,-p],[p,-p,p],[-p,-p,-p],[p,-p,p],[-p,-p,p]]]];for(var i=0;i<f.length;i++)for(var j=0;j<6;j++){pos.push(f[i][1][j][0],f[i][1][j][1],f[i][1][j][2]);nor.push(f[i][0][0],f[i][0][1],f[i][0][2]);}return{positions:new Float32Array(pos),normals:new Float32Array(nor)};}
   function makeSphere(r,ls,lo){var pos=[],nor=[];function pt(t,p){var st=Math.sin(t),ct=Math.cos(t),sp=Math.sin(p),cp=Math.cos(p);return{x:r*st*cp,y:r*ct,z:r*st*sp,nx:st*cp,ny:ct,nz:st*sp};}for(var i=0;i<ls;i++){var t0=i*Math.PI/ls,t1=(i+1)*Math.PI/ls;for(var j=0;j<lo;j++){var p0=j*2*Math.PI/lo,p1=(j+1)*2*Math.PI/lo;var a=pt(t0,p0),b=pt(t1,p0),c=pt(t0,p1),d=pt(t1,p1);pos.push(a.x,a.y,a.z,b.x,b.y,b.z,c.x,c.y,c.z);nor.push(a.nx,a.ny,a.nz,b.nx,b.ny,b.nz,c.nx,c.ny,c.nz);pos.push(c.x,c.y,c.z,b.x,b.y,b.z,d.x,d.y,d.z);nor.push(c.nx,c.ny,c.nz,b.nx,b.ny,b.nz,d.nx,d.ny,d.nz);}}return{positions:new Float32Array(pos),normals:new Float32Array(nor)};}
   function makeTorus(R,r,sr,st){var pos=[],nor=[];function pt(p,t){var cp=Math.cos(p),sp=Math.sin(p),ct=Math.cos(t),st=Math.sin(t);return{x:(R+r*ct)*cp,y:r*st,z:(R+r*ct)*sp,nx:ct*cp,ny:st,nz:ct*sp};}for(var i=0;i<sr;i++){var p0=i/sr*Math.PI*2,p1=(i+1)/sr*Math.PI*2;for(var j=0;j<st;j++){var t0=j/st*Math.PI*2,t1=(j+1)/st*Math.PI*2;var a=pt(p0,t0),b=pt(p1,t0),c=pt(p0,t1),d=pt(p1,t1);pos.push(a.x,a.y,a.z,b.x,b.y,b.z,c.x,c.y,c.z);nor.push(a.nx,a.ny,a.nz,b.nx,b.ny,b.nz,c.nx,c.ny,c.nz);pos.push(c.x,c.y,c.z,b.x,b.y,b.z,d.x,d.y,d.z);nor.push(c.nx,c.ny,c.nz,b.nx,b.ny,b.nz,d.nx,d.ny,d.nz);}}return{positions:new Float32Array(pos),normals:new Float32Array(nor)};}
@@ -83,24 +93,17 @@
   function createProgram(c,vs,fs){var p=c.createProgram();c.attachShader(p,compileShader(c,c.VERTEX_SHADER,vs));c.attachShader(p,compileShader(c,c.FRAGMENT_SHADER,fs));c.linkProgram(p);if(!c.getProgramParameter(p,c.LINK_STATUS))throw new Error(c.getProgramInfoLog(p));return p;}
   function createMesh(c,g){var pb=c.createBuffer();c.bindBuffer(c.ARRAY_BUFFER,pb);c.bufferData(c.ARRAY_BUFFER,g.positions,c.STATIC_DRAW);var nb=c.createBuffer();c.bindBuffer(c.ARRAY_BUFFER,nb);c.bufferData(c.ARRAY_BUFFER,g.normals,c.STATIC_DRAW);return{posBuf:pb,norBuf:nb,count:g.positions.length/3};}
 
-  // ==================== حلقه رندر مشترک ====================
+  // ==================== رندر مشترک ====================
   function drawScene(viewMatrix, projMatrix, time) {
     if(!gl) return;
     var t=time*0.001,dt=lastTime?Math.min(t-lastTime,0.1):0;lastTime=t;
-    
-    // به‌روزرسانی چرخش اشیاء
     for(var i=0;i<objects.length;i++){var o=objects[i];o.rotY+=o.rotSpeedY*dt;o.rotX+=o.rotSpeedX*dt;o.matrix=mat4Compose(o.position,o.rotY,o.rotX,1);}
-    
     var vp = mat4Mul(projMatrix, viewMatrix);
-    
-    // رندر گرید (فقط در حالت پشتیبان)
     if(!isXR) {
       gl.useProgram(progSolid);gl.uniformMatrix4fv(solidLocs.uMVP,false,vp);gl.uniform4fv(solidLocs.uColor,[0,0.9,1,0.35]);
       gl.depthMask(false);gl.bindBuffer(gl.ARRAY_BUFFER,gridBuf);gl.enableVertexAttribArray(solidLocs.aPos);
       gl.vertexAttribPointer(solidLocs.aPos,3,gl.FLOAT,false,0,0);gl.drawArrays(gl.LINES,0,gridCount);gl.depthMask(true);
     }
-    
-    // رندر اشیاء
     gl.useProgram(progLit);
     for(var j=0;j<objects.length;j++){
       var ob=objects[j];gl.uniformMatrix4fv(litLocs.uMVP,false,mat4Mul(vp,ob.matrix));gl.uniformMatrix4fv(litLocs.uModel,false,ob.matrix);
@@ -111,38 +114,23 @@
     }
   }
 
-  // ==================== WebXR (AR واقعی) ====================
+  // ==================== WebXR ====================
   async function startXR() {
     try {
-      xrSession = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['local-floor'],
-        optionalFeatures: ['dom-overlay'],
-        domOverlay: { root: document.body }
-      });
-      
+      xrSession = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'] });
       xrSession.addEventListener('end', onXRSessionEnded);
       gl = canvas.getContext('webgl', { xrCompatible: true });
       await gl.makeXRCompatible();
-      
       xrSession.updateRenderState({ baseLayer: new XRWebGLLayer(xrSession, gl) });
       xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
-      xrViewerSpace = await xrSession.requestReferenceSpace('viewer');
       
-      // فعال‌سازی Hit Test برای پیدا کردن سطح زمین
-      if (xrSession.requestHitTestSource) {
-        xrHitTestSource = await xrSession.requestHitTestSource({ space: xrViewerSpace });
-      }
-
       buildScene();
       ui.style.display = 'none';
-      hintEl.textContent = 'برای قرار دادن اشیاء، دوربین را به سمت زمین بگیرید';
-      hintEl.style.display = 'block';
-      hintEl.style.opacity = '1';
+      hintEl.textContent = 'برای حرکت، گوشی را در فضا جابجا کنید';
+      hintEl.style.display = 'block'; hintEl.style.opacity = '1';
       setTimeout(() => { hintEl.style.opacity = '0'; }, 6000);
-
       xrSession.requestAnimationFrame(onXRFrame);
     } catch(err) {
-      console.error('WebXR Error:', err);
       startFallback();
     }
   }
@@ -151,60 +139,35 @@
     xrSession.requestAnimationFrame(onXRFrame);
     const pose = frame.getViewerPose(xrRefSpace);
     if (!pose) return;
-
     const layer = xrSession.renderState.baseLayer;
     gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
-    gl.clearColor(0,0,0,0);
-    gl.clearDepth(1);
-    gl.enable(gl.DEPTH_TEST);
-    gl.depthFunc(gl.LEQUAL);
-    gl.disable(gl.CULL_FACE);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.clearColor(0,0,0,0); gl.clearDepth(1);
+    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-    // بررسی برخورد با زمین
-    if (xrHitTestSource) {
-      const hitTestResults = frame.getHitTestResults(xrHitTestSource);
-      if (hitTestResults.length > 0) {
-        const hit = hitTestResults[0];
-        const hitPose = hit.getPose(xrRefSpace);
-        if (hitPose) {
-          // اگر می‌خواستید اشیاء را دقیقاً روی زمین بگذارید، اینجا نقطه برخورد را دارید.
-          // برای این دمو، ما اشیاء را در موقعیت ثابت نگه می‌داریم تا در همه دستگاه‌ها کار کند.
-        }
-      }
-    }
-
     for (const view of pose.views) {
       const viewport = layer.getViewport(view);
       gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
-      
-      const projMatrix = view.projectionMatrix;
-      const viewMatrix = view.transform.inverse.matrix;
-      
-      drawScene(viewMatrix, projMatrix, time);
+      drawScene(view.transform.inverse.matrix, view.projectionMatrix, time);
     }
   }
 
   function onXRSessionEnded() {
-    xrSession = null;
-    isXR = false;
-    video.style.display = 'none';
-    ui.style.display = 'flex';
-    statusEl.textContent = 'جلسه AR پایان یافت.';
+    xrSession = null; isXR = false; video.style.display = 'none';
+    ui.style.display = 'flex'; statusEl.textContent = 'جلسه پایان یافت.';
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   }
 
-  // ==================== Fallback (دوربین + سنسور) ====================
+  // ==================== Fallback + Joystick ====================
   function startFallback() {
     isXR = false;
-    document.getElementById('hint').textContent = 'برای چرخش، انگشت خود را روی صفحه بکشید';
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
-      .catch(function(err){ if(err.name === 'OverconstrainedError') return navigator.mediaDevices.getUserMedia({video: true}); throw err; })
+    joyZone.style.display = 'block'; // نمایش جوی‌استیک
+    
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } })
       .then(function(s) {
         video.srcObject = s; video.play().catch(function(){}); video.style.display = 'block';
         
+        // درخواست مجوز سنسور
         if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
           DeviceOrientationEvent.requestPermission().then(function(p) {
             if (p === 'granted') window.addEventListener('deviceorientation', onOrient, true);
@@ -213,16 +176,22 @@
           window.addEventListener('deviceorientation', onOrient, true);
         }
 
-        setupGL();
-        buildScene();
-        resize();
+        setupGL(); buildScene(); resize();
         window.addEventListener('resize', resize);
-        canvas.addEventListener('pointerdown', onDown, { passive: true });
-        canvas.addEventListener('pointermove', onMove, { passive: true });
-        canvas.addEventListener('pointerup', onUp, { passive: true });
-        canvas.addEventListener('pointercancel', onUp, { passive: true });
+        
+        // رویدادهای لمسی برای چرخش
+        canvas.addEventListener('pointerdown', onDown, { passive: false });
+        canvas.addEventListener('pointermove', onMove, { passive: false });
+        canvas.addEventListener('pointerup', onUp, { passive: false });
+        canvas.addEventListener('pointercancel', onUp, { passive: false });
+
+        // رویدادهای لمسی برای جوی‌استیک
+        joyZone.addEventListener('pointerdown', onJoyDown, { passive: false });
+        joyZone.addEventListener('pointermove', onJoyMove, { passive: false });
+        joyZone.addEventListener('pointerup', onJoyUp, { passive: false });
 
         ui.style.display = 'none';
+        hintEl.textContent = 'برای چرخش انگشت بکشید / با جوی‌استیک حرکت کنید';
         hintEl.style.display = 'block';
         requestAnimationFrame(function(){ hintEl.style.opacity = '1'; });
         setTimeout(function(){ hintEl.style.opacity = '0'; }, 6000);
@@ -230,38 +199,121 @@
         lastTime = 0;
         renderFallback();
       }).catch(function(err) {
-        statusEl.textContent = 'خطا در دسترسی به دوربین: ' + err.message;
+        statusEl.textContent = 'خطا در دوربین: ' + err.message;
       });
   }
 
+  // فیلتر نرم‌کننده (Smoothing) برای رفع لرزش
   function onOrient(e) {
     if (e.alpha === null || e.beta === null || e.gamma === null) return;
-    sensorData.alpha = e.alpha; sensorData.beta = e.beta; sensorData.gamma = e.gamma;
-    if (!sensorActive) sensorActive = true;
+    // فیلتر Low-Pass برای حذف نویز
+    var factor = 0.15; 
+    if (!sensorActive) {
+      smoothAlpha = e.alpha; smoothBeta = e.beta; smoothGamma = e.gamma;
+      sensorActive = true;
+    } else {
+      // مدیریت پرش درجه ۳۶۰ برای آلفا
+      var dAlpha = e.alpha - smoothAlpha;
+      if (dAlpha > 180) dAlpha -= 360; if (dAlpha < -180) dAlpha += 360;
+      smoothAlpha += dAlpha * factor;
+      smoothBeta += (e.beta - smoothBeta) * factor;
+      smoothGamma += (e.gamma - smoothGamma) * factor;
+    }
   }
+
   function screenAngle() { var d = (screen.orientation && screen.orientation.angle) || window.orientation || 0; return (((d%360)+360)%360)*Math.PI/180; }
-  function sensorView() { var d=Math.PI/180; var R=mat4Mul(mat4RotZ(sensorData.alpha*d),mat4Mul(mat4RotX(sensorData.beta*d),mat4RotY(sensorData.gamma*d))); return mat4Mul(mat4RotZ(screenAngle()),mat4Mul(mat4Transpose(R),M_APP_TO_EARTH)); }
-  function touchView() { return mat4Mul(mat4RotX(-pitch),mat4RotY(-yaw)); }
+  
+  function sensorView() { 
+    var d=Math.PI/180; 
+    var R=mat4Mul(mat4RotZ(smoothAlpha*d),mat4Mul(mat4RotX(smoothBeta*d),mat4RotY(smoothGamma*d))); 
+    return mat4Mul(mat4RotZ(screenAngle()),mat4Mul(mat4Transpose(R),M_APP_TO_EARTH)); 
+  }
+  
+  // ترکیب چرخش لمسی + موقعیت مکانی
+  function fallbackView() { 
+    var rot = mat4Mul(mat4RotX(-pitch),mat4RotY(-yaw));
+    var trans = mat4Translate(-camX, -camY, -camZ);
+    return mat4Mul(rot, trans);
+  }
 
   function renderFallback() {
     rafId = requestAnimationFrame(renderFallback);
+    
+    // محاسبه حرکت بر اساس جوی‌استیک
+    var speed = 2.0; // سرعت حرکت (واحد در ثانیه)
+    var dt = lastTime ? Math.min(performance.now()*0.001 - lastTime, 0.1) : 0;
+    
+    if (joyActive || Math.abs(joyX) > 0.01 || Math.abs(joyY) > 0.01) {
+      // حرکت به سمت جلو/عقب (joyY) و چپ/راست (joyX)
+      var moveForward = -joyY; // بالا در جوی‌استیک یعنی جلو
+      var moveRight = joyX;
+      
+      camX += (Math.sin(yaw) * moveForward + Math.cos(yaw) * moveRight) * speed * dt;
+      camZ += (Math.cos(yaw) * moveForward - Math.sin(yaw) * moveRight) * speed * dt;
+    }
+
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0,0,0,0); gl.clearDepth(1);
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     
-    var view = sensorActive ? sensorView() : touchView();
+    // اگر سنسور فعال است، از سنسور استفاده کن، وگرنه از لمس
+    // توجه: اگر از سنسور استفاده می‌کنیم، چرخش لمسی (yaw/pitch) را نادیده بگیر
+    var view = sensorActive ? mat4Mul(mat4Translate(-camX, -camY, -camZ), sensorView()) : fallbackView();
     var proj = mat4Perspective(70, canvas.width / Math.max(1, canvas.height), 0.1, 100);
     
     drawScene(view, proj, performance.now());
   }
 
-  function resize() { var d = Math.min(window.devicePixelRatio || 1, 2); canvas.width = Math.round(window.innerWidth * d); canvas.height = Math.round(window.innerHeight * d); canvas.style.width = window.innerWidth + 'px'; canvas.style.height = window.innerHeight + 'px'; }
-  function onDown(e) { if (sensorActive) return; dragging = true; lastX = e.clientX; lastY = e.clientY; }
-  function onMove(e) { if (!dragging || sensorActive) return; var dx = e.clientX - lastX, dy = e.clientY - lastY; lastX = e.clientX; lastY = e.clientY; yaw -= dx * SENS; pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, pitch - dy * SENS)); }
+  // ==================== رویدادهای لمسی (چرخش) ====================
+  function onDown(e) { 
+    if (e.target === joyZone || e.target === joyKnob) return; // اگر روی جوی‌استیک بود، نادیده بگیر
+    dragging = true; lastX = e.clientX; lastY = e.clientY; 
+  }
+  function onMove(e) { 
+    if (!dragging) return; 
+    var dx = e.clientX - lastX, dy = e.clientY - lastY; lastX = e.clientX; lastY = e.clientY; 
+    yaw -= dx * 0.005; 
+    pitch = Math.max(-1.5, Math.min(1.5, pitch - dy * 0.005)); 
+  }
   function onUp() { dragging = false; }
 
-  // ==================== شروع برنامه ====================
+  // ==================== رویدادهای جوی‌استیک ====================
+  function onJoyDown(e) {
+    e.preventDefault();
+    joyActive = true;
+    var rect = joyZone.getBoundingClientRect();
+    joyCenter.x = rect.left + rect.width / 2;
+    joyCenter.y = rect.top + rect.height / 2;
+    onJoyMove(e);
+  }
+  function onJoyMove(e) {
+    if (!joyActive) return;
+    e.preventDefault();
+    var dx = e.clientX - joyCenter.x;
+    var dy = e.clientY - joyCenter.y;
+    
+    // محدود کردن به شعاع جوی‌استیک
+    var maxDist = 45;
+    var dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist > maxDist) { dx = (dx/dist)*maxDist; dy = (dy/dist)*maxDist; }
+    
+    joyKnob.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
+    
+    // نرمال‌سازی بین -1 و 1
+    joyX = dx / maxDist;
+    joyY = dy / maxDist;
+  }
+  function onJoyUp(e) {
+    e.preventDefault();
+    joyActive = false;
+    joyX = 0; joyY = 0;
+    joyKnob.style.transform = 'translate(0px, 0px)';
+  }
+
+  function resize() { var d = Math.min(window.devicePixelRatio || 1, 2); canvas.width = Math.round(window.innerWidth * d); canvas.height = Math.round(window.innerHeight * d); canvas.style.width = window.innerWidth + 'px'; canvas.style.height = window.innerHeight + 'px'; }
+
+  // ==================== شروع ====================
   document.getElementById('btn-start').onclick = async function() {
     this.disabled = true;
     this.textContent = 'در حال راه‌اندازی...';
@@ -274,7 +326,6 @@
       startFallback();
     }
   };
-
 })();
 </script>
 </body>
