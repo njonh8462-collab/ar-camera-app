@@ -3,7 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#000000">
 <title>AR Ultimate</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
@@ -11,22 +10,18 @@
   #video { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; background: #000; }
   #canvas { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 2; display: block; }
   
-  /* رابط کاربری اولیه */
   #ui { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; background: rgba(0,0,0,0.9); padding: 20px; }
   .btn { margin: 8px; padding: 16px 32px; font-size: 18px; font-weight: bold; font-family: inherit; color: #fff; background: #2979ff; border: none; border-radius: 30px; box-shadow: 0 4px 15px rgba(41,121,255,0.4); cursor: pointer; transition: 0.2s; }
   .btn:active { transform: scale(0.95); }
   .btn-start { background: #ff3d00; margin-top: 25px; font-size: 22px; padding: 20px 60px; }
   #status { margin-top: 25px; font-size: 15px; text-align: center; color: #b0bec5; line-height: 1.6; }
 
-  /* راهنما */
   #hint { position: fixed; top: 10%; left: 50%; transform: translateX(-50%); z-index: 15; padding: 12px 24px; border-radius: 30px; background: rgba(0,0,0,0.8); color: #80d8ff; font-size: 15px; text-align: center; pointer-events: none; display: none; opacity: 0; transition: opacity 0.5s; white-space: nowrap; }
   
-  /* جوی‌استیک (فقط در حالت پشتیبان) */
   #joystick-zone { position: fixed; bottom: 30px; left: 30px; width: 140px; height: 140px; z-index: 20; display: none; touch-action: none; }
   #joystick-base { position: absolute; width: 100%; height: 100%; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; }
   #joystick-knob { position: absolute; top: 40px; left: 40px; width: 60px; height: 60px; background: rgba(41,121,255,0.9); border-radius: 50%; box-shadow: 0 0 15px rgba(41,121,255,0.6); }
   
-  /* صفحه خطا */
   #error-box { position: fixed; top: 0; left: 0; right: 0; background: #d50000; color: #fff; padding: 15px; font-family: monospace; direction: ltr; text-align: left; z-index: 9999; display: none; word-wrap: break-word; font-size: 13px; }
 </style>
 </head>
@@ -49,7 +44,7 @@
     <h1 style="color:#58a6ff; margin-bottom:10px;">واقعیت افزوده نهایی</h1>
     <p style="color:#8b949e; font-size:14px; text-align:center;">برای بهترین تجربه، از مرورگر کروم استفاده کنید.</p>
     <button id="btn-start" class="btn btn-start">شروع تجربه</button>
-    <div id="status">در حال آماده‌سازی...</div>
+    <div id="status">آماده راه‌اندازی...</div>
   </div>
 
   <div id="joystick-zone">
@@ -60,20 +55,21 @@
 <script>
 (function() {
   'use strict';
-  // نسخه نهایی - جلوگیری از کش
-  console.log("AR Ultimate v3.0 - Loaded");
 
+  // ==================== تعریف متغیرها (رفع خطای قبلی) ====================
   const video = document.getElementById('video'), canvas = document.getElementById('canvas');
   const ui = document.getElementById('ui'), statusEl = document.getElementById('status'), hintEl = document.getElementById('hint');
   
   let gl = null, isXR = false, xrSession = null, xrRefSpace = null;
-  let progLit = null, litLocs = null, objects = [], gridBuf = null, gridCount = 0;
+  let progLit = null, progSolid = null; // <--- تعریف متغیرهای فراموش شده
+  let litLocs = null, solidLocs = null; // <--- تعریف متغیرهای فراموش شده
+  let objects = [], gridBuf = null, gridCount = 0;
   let rafId = null, lastTime = 0;
 
-  // ==================== حالت پشتیبان (Fallback) ====================
+  // حالت پشتیبان (Fallback)
   let sensorActive = false;
   let smoothAlpha = 0, smoothBeta = 0, smoothGamma = 0;
-  let camX = 0, camY = -1.6, camZ = 0; // موقعیت شروع دوربین (1.6 متر ارتفاع)
+  let camX = 0, camY = -1.6, camZ = 0; 
   let yaw = 0, pitch = 0, dragging = false, lastX = 0, lastY = 0;
   const M_APP_TO_EARTH = new Float32Array([1,0,0,0, 0,0,1,0, 0,-1,0,0, 0,0,0,1]);
 
@@ -93,7 +89,7 @@
   function mat4Compose(p,ry,rx,s){let m=mat4Translate(p[0],p[1],p[2]);m=mat4Mul(m,mat4RotY(ry));m=mat4Mul(m,mat4RotX(rx));m=mat4Mul(m,mat4Scale(s));return m;}
   function mat4Perspective(f,a,n,fa){let t=1.0/Math.tan((f/2)*Math.PI/180);return new Float32Array([t/a,0,0,0, 0,t,0,0, 0,0,(fa+n)/(n-fa),-1, 0,0,(2*fa*n)/(n-fa),0]);}
 
-  // ==================== تولید احجام ====================
+  // ==================== احجام ====================
   function makeCube(){let p=0.5,pos=[],nor=[];let f=[[[0,0,1],[[-p,-p,p],[p,-p,p],[p,p,p],[-p,-p,p],[p,p,p],[-p,p,p]]],[[0,0,-1],[[p,-p,-p],[-p,-p,-p],[-p,p,-p],[p,-p,-p],[-p,p,-p],[p,p,-p]]],[[1,0,0],[[p,-p,p],[p,-p,-p],[p,p,-p],[p,-p,p],[p,p,-p],[p,p,p]]],[[-1,0,0],[[-p,-p,-p],[-p,-p,p],[-p,p,p],[-p,-p,-p],[-p,p,p],[-p,p,-p]]],[[0,1,0],[[-p,p,p],[p,p,p],[p,p,-p],[-p,p,p],[p,p,-p],[-p,p,-p]]],[[0,-1,0],[[-p,-p,-p],[p,-p,-p],[p,-p,p],[-p,-p,-p],[p,-p,p],[-p,-p,p]]]];for(let i=0;i<f.length;i++)for(let j=0;j<6;j++){pos.push(f[i][1][j][0],f[i][1][j][1],f[i][1][j][2]);nor.push(f[i][0][0],f[i][0][1],f[i][0][2]);}return{positions:new Float32Array(pos),normals:new Float32Array(nor)};}
   function makeSphere(r,ls,lo){let pos=[],nor=[];function pt(t,p){let st=Math.sin(t),ct=Math.cos(t),sp=Math.sin(p),cp=Math.cos(p);return{x:r*st*cp,y:r*ct,z:r*st*sp,nx:st*cp,ny:ct,nz:st*sp};}for(let i=0;i<ls;i++){let t0=i*Math.PI/ls,t1=(i+1)*Math.PI/ls;for(let j=0;j<lo;j++){let p0=j*2*Math.PI/lo,p1=(j+1)*2*Math.PI/lo;let a=pt(t0,p0),b=pt(t1,p0),c=pt(t0,p1),d=pt(t1,p1);pos.push(a.x,a.y,a.z,b.x,b.y,b.z,c.x,c.y,c.z);nor.push(a.nx,a.ny,a.nz,b.nx,b.ny,b.nz,c.nx,c.ny,c.nz);pos.push(c.x,c.y,c.z,b.x,b.y,b.z,d.x,d.y,d.z);nor.push(c.nx,c.ny,c.nz,b.nx,b.ny,b.nz,d.nx,d.ny,d.nz);}}return{positions:new Float32Array(pos),normals:new Float32Array(nor)};}
   function makeTorus(R,r,sr,st){let pos=[],nor=[];function pt(p,t){let cp=Math.cos(p),sp=Math.sin(p),ct=Math.cos(t),st=Math.sin(t);return{x:(R+r*ct)*cp,y:r*st,z:(R+r*ct)*sp,nx:ct*cp,ny:st,nz:ct*sp};}for(let i=0;i<sr;i++){let p0=i/sr*Math.PI*2,p1=(i+1)/sr*Math.PI*2;for(let j=0;j<st;j++){let t0=j/st*Math.PI*2,t1=(j+1)/st*Math.PI*2;let a=pt(p0,t0),b=pt(p1,t0),c=pt(p0,t1),d=pt(p1,t1);pos.push(a.x,a.y,a.z,b.x,b.y,b.z,c.x,c.y,c.z);nor.push(a.nx,a.ny,a.nz,b.nx,b.ny,b.nz,c.nx,c.ny,c.nz);pos.push(c.x,c.y,c.z,b.x,b.y,b.z,d.x,d.y,d.z);nor.push(c.nx,c.ny,c.nz,b.nx,b.ny,b.nz,d.nx,d.ny,d.nz);}}return{positions:new Float32Array(pos),normals:new Float32Array(nor)};}
@@ -106,15 +102,23 @@
   const VS_SOLID='attribute vec3 aPos;uniform mat4 uMVP;void main(){gl_Position=uMVP*vec4(aPos,1.0);}';
   const FS_SOLID='precision highp float;uniform vec4 uColor;void main(){gl_FragColor=vec4(uColor.rgb*uColor.a,uColor.a);}';
 
-  // ==================== WebGL Setup ====================
+  // ==================== WebGL ====================
   function setupGL(){
-    const opt={alpha:true,antialias:true,premultipliedAlpha:true,depth:true,powerPreference:"high-performance"};
-    gl=canvas.getContext('webgl',opt)||canvas.getContext('experimental-webgl',opt);
-    if(!gl) throw new Error('WebGL در این مرورگر پشتیبانی نمی‌شود.');
-    progLit=createProgram(gl,VS_LIT,FS_LIT);
-    litLocs={aPos:gl.getAttribLocation(progLit,'aPos'),aNormal:gl.getAttribLocation(progLit,'aNormal'),uMVP:gl.getUniformLocation(progLit,'uMVP'),uModel:gl.getUniformLocation(progLit,'uModel'),uColor:gl.getUniformLocation(progLit,'uColor'),uLightDir:gl.getUniformLocation(progLit,'uLightDir'),uEyePos:gl.getUniformLocation(progLit,'uEyePos'),uEmissive:gl.getUniformLocation(progLit,'uEmissive')};
-    progSolid=createProgram(gl,VS_SOLID,FS_SOLID);
-    solidLocs={aPos:gl.getAttribLocation(progSolid,'aPos'),uMVP:gl.getUniformLocation(progSolid,'uMVP'),uColor:gl.getUniformLocation(progSolid,'uColor')};
+    try {
+      const opt={alpha:true,antialias:true,premultipliedAlpha:true,depth:true,powerPreference:"high-performance"};
+      gl=canvas.getContext('webgl',opt)||canvas.getContext('experimental-webgl',opt);
+      if(!gl) throw new Error('WebGL در این مرورگر پشتیبانی نمی‌شود.');
+      
+      progLit=createProgram(gl,VS_LIT,FS_LIT);
+      litLocs={aPos:gl.getAttribLocation(progLit,'aPos'),aNormal:gl.getAttribLocation(progLit,'aNormal'),uMVP:gl.getUniformLocation(progLit,'uMVP'),uModel:gl.getUniformLocation(progLit,'uModel'),uColor:gl.getUniformLocation(progLit,'uColor'),uLightDir:gl.getUniformLocation(progLit,'uLightDir'),uEyePos:gl.getUniformLocation(progLit,'uEyePos'),uEmissive:gl.getUniformLocation(progLit,'uEmissive')};
+      
+      progSolid=createProgram(gl,VS_SOLID,FS_SOLID);
+      solidLocs={aPos:gl.getAttribLocation(progSolid,'aPos'),uMVP:gl.getUniformLocation(progSolid,'uMVP'),uColor:gl.getUniformLocation(progSolid,'uColor')};
+    } catch(e) {
+      console.error(e);
+      statusEl.textContent = 'خطا در راه‌اندازی گرافیک: ' + e.message;
+      throw e;
+    }
   }
   
   function buildScene(){
@@ -135,20 +139,15 @@
   function drawScene(viewMatrix, projMatrix, time) {
     if(!gl) return;
     const t=time*0.001,dt=lastTime?Math.min(t-lastTime,0.1):0;lastTime=t;
-    
-    // چرخش خودکار اشیاء
     for(let i=0;i<objects.length;i++){const o=objects[i];o.rotY+=o.rotSpeedY*dt;o.rotX+=o.rotSpeedX*dt;o.matrix=mat4Compose(o.position,o.rotY,o.rotX,1);}
-    
     const vp = mat4Mul(projMatrix, viewMatrix);
     
-    // رندر گرید (فقط در حالت غیر WebXR)
-    if(!isXR) {
+    if(!isXR && progSolid) {
       gl.useProgram(progSolid);gl.uniformMatrix4fv(solidLocs.uMVP,false,vp);gl.uniform4fv(solidLocs.uColor,[0,0.9,1,0.4]);
       gl.depthMask(false);gl.bindBuffer(gl.ARRAY_BUFFER,gridBuf);gl.enableVertexAttribArray(solidLocs.aPos);
       gl.vertexAttribPointer(solidLocs.aPos,3,gl.FLOAT,false,0,0);gl.drawArrays(gl.LINES,0,gridCount);gl.depthMask(true);
     }
     
-    // رندر اشیاء
     gl.useProgram(progLit);
     for(let j=0;j<objects.length;j++){
       const ob=objects[j];gl.uniformMatrix4fv(litLocs.uMVP,false,mat4Mul(vp,ob.matrix));gl.uniformMatrix4fv(litLocs.uModel,false,ob.matrix);
@@ -159,7 +158,7 @@
     }
   }
 
-  // ==================== WebXR (واقعیت افزوده واقعی) ====================
+  // ==================== WebXR (AR واقعی) ====================
   async function startXR() {
     try {
       xrSession = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'] });
@@ -172,9 +171,17 @@
       gl = canvas.getContext('webgl', { xrCompatible: true });
       await gl.makeXRCompatible();
       xrSession.updateRenderState({ baseLayer: new XRWebGLLayer(xrSession, gl) });
-      xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
       
+      // تلاش برای گرفتن local-floor یا local
+      try {
+        xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
+      } catch (e) {
+        xrRefSpace = await xrSession.requestReferenceSpace('local');
+      }
+      
+      setupGL();
       buildScene();
+      
       ui.style.display = 'none';
       hintEl.textContent = 'حرکت در فضای واقعی فعال است. گوشی را جابجا کنید.';
       hintEl.style.display = 'block'; hintEl.style.opacity = '1';
@@ -182,7 +189,7 @@
       
       xrSession.requestAnimationFrame(onXRFrame);
     } catch(err) {
-      console.warn('WebXR failed, starting fallback:', err);
+      console.warn('WebXR failed:', err);
       startFallback();
     }
   }
@@ -208,13 +215,12 @@
   // ==================== حالت پشتیبان (دوربین + سنسور + جوی‌استیک) ====================
   function startFallback() {
     isXR = false;
-    joyZone.style.display = 'block'; // نمایش جوی‌استیک برای حرکت
+    joyZone.style.display = 'block'; 
     
     navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } })
       .then(function(s) {
         video.srcObject = s; video.play().catch(()=>{}); video.style.display = 'block';
         
-        // درخواست مجوز سنسور (برای iOS)
         if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
           DeviceOrientationEvent.requestPermission().then(function(p) {
             if (p === 'granted') window.addEventListener('deviceorientation', onOrient, true);
@@ -226,13 +232,11 @@
         setupGL(); buildScene(); resize();
         window.addEventListener('resize', resize);
         
-        // لمس برای چرخش
         canvas.addEventListener('pointerdown', onDown, { passive: false });
         canvas.addEventListener('pointermove', onMove, { passive: false });
         canvas.addEventListener('pointerup', onUp, { passive: false });
         canvas.addEventListener('pointercancel', onUp, { passive: false });
 
-        // جوی‌استیک برای حرکت
         joyZone.addEventListener('pointerdown', onJoyDown, { passive: false });
         joyZone.addEventListener('pointermove', onJoyMove, { passive: false });
         joyZone.addEventListener('pointerup', onJoyUp, { passive: false });
@@ -250,15 +254,13 @@
       });
   }
 
-  // فیلتر رفع لرزش (Low-Pass Filter)
   function onOrient(e) {
     if (e.alpha === null || e.beta === null || e.gamma === null) return;
-    const f = 0.1; // هرچه کمتر باشد، نرم‌تر است (اما تاخیر بیشتری دارد)
+    const f = 0.15; 
     if (!sensorActive) {
       smoothAlpha = e.alpha; smoothBeta = e.beta; smoothGamma = e.gamma;
       sensorActive = true;
     } else {
-      // مدیریت چرخش 360 درجه
       let dAlpha = e.alpha - smoothAlpha;
       if (dAlpha > 180) dAlpha -= 360; if (dAlpha < -180) dAlpha += 360;
       smoothAlpha += dAlpha * f;
@@ -283,16 +285,12 @@
 
   function renderFallback() {
     rafId = requestAnimationFrame(renderFallback);
-    
-    // حرکت با جوی‌استیک
-    const speed = 2.5; // متر بر ثانیه
+    const speed = 2.5; 
     const dt = lastTime ? Math.min(performance.now()*0.001 - lastTime, 0.1) : 0;
     
     if (Math.abs(joyX) > 0.05 || Math.abs(joyY) > 0.05) {
       const moveForward = -joyY;
       const moveRight = joyX;
-      
-      // حرکت بر اساس جهت نگاه (yaw)
       camX += (Math.sin(yaw) * moveForward + Math.cos(yaw) * moveRight) * speed * dt;
       camZ += (Math.cos(yaw) * moveForward - Math.sin(yaw) * moveRight) * speed * dt;
     }
@@ -302,56 +300,26 @@
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     
-    // استفاده از سنسور برای چرخش، و جوی‌استیک برای جابجایی
     const view = sensorActive ? mat4Mul(mat4Translate(-camX, -camY, -camZ), sensorView()) : fallbackView();
     const proj = mat4Perspective(70, canvas.width / Math.max(1, canvas.height), 0.1, 100);
     
     drawScene(view, proj, performance.now());
   }
 
-  // ==================== رویدادهای لمسی ====================
-  function onDown(e) { 
-    if (e.target === joyZone || e.target === joyKnob) return;
-    dragging = true; lastX = e.clientX; lastY = e.clientY; 
-  }
-  function onMove(e) { 
-    if (!dragging) return; 
-    const dx = e.clientX - lastX, dy = e.clientY - lastY; lastX = e.clientX; lastY = e.clientY; 
-    yaw -= dx * 0.005; 
-    pitch = Math.max(-1.5, Math.min(1.5, pitch - dy * 0.005)); 
-  }
+  function onDown(e) { if (e.target === joyZone || e.target === joyKnob) return; dragging = true; lastX = e.clientX; lastY = e.clientY; }
+  function onMove(e) { if (!dragging) return; const dx = e.clientX - lastX, dy = e.clientY - lastY; lastX = e.clientX; lastY = e.clientY; yaw -= dx * 0.005; pitch = Math.max(-1.5, Math.min(1.5, pitch - dy * 0.005)); }
   function onUp() { dragging = false; }
 
-  // ==================== رویدادهای جوی‌استیک ====================
-  function onJoyDown(e) {
-    e.preventDefault();
-    joyActive = true;
-    const rect = joyZone.getBoundingClientRect();
-    joyCenter.x = rect.left + rect.width / 2;
-    joyCenter.y = rect.top + rect.height / 2;
-    onJoyMove(e);
-  }
+  function onJoyDown(e) { e.preventDefault(); joyActive = true; const rect = joyZone.getBoundingClientRect(); joyCenter.x = rect.left + rect.width / 2; joyCenter.y = rect.top + rect.height / 2; onJoyMove(e); }
   function onJoyMove(e) {
-    if (!joyActive) return;
-    e.preventDefault();
-    let dx = e.clientX - joyCenter.x;
-    let dy = e.clientY - joyCenter.y;
-    
-    const maxDist = 50;
-    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (!joyActive) return; e.preventDefault();
+    let dx = e.clientX - joyCenter.x; let dy = e.clientY - joyCenter.y;
+    const maxDist = 50; const dist = Math.sqrt(dx*dx + dy*dy);
     if (dist > maxDist) { dx = (dx/dist)*maxDist; dy = (dy/dist)*maxDist; }
-    
     joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
-    
-    joyX = dx / maxDist;
-    joyY = dy / maxDist;
+    joyX = dx / maxDist; joyY = dy / maxDist;
   }
-  function onJoyUp(e) {
-    e.preventDefault();
-    joyActive = false;
-    joyX = 0; joyY = 0;
-    joyKnob.style.transform = 'translate(0px, 0px)';
-  }
+  function onJoyUp(e) { e.preventDefault(); joyActive = false; joyX = 0; joyY = 0; joyKnob.style.transform = 'translate(0px, 0px)'; }
 
   function resize() { const d = Math.min(window.devicePixelRatio || 1, 2); canvas.width = Math.round(window.innerWidth * d); canvas.height = Math.round(window.innerHeight * d); canvas.style.width = window.innerWidth + 'px'; canvas.style.height = window.innerHeight + 'px'; }
 
@@ -361,10 +329,14 @@
     this.textContent = 'در حال راه‌اندازی...';
     statusEl.textContent = 'در حال بررسی سخت‌افزار...';
 
-    if (navigator.xr && await navigator.xr.isSessionSupported('immersive-ar')) {
-      isXR = true;
-      startXR();
-    } else {
+    try {
+      if (navigator.xr && await navigator.xr.isSessionSupported('immersive-ar')) {
+        isXR = true;
+        await startXR();
+      } else {
+        startFallback();
+      }
+    } catch (e) {
       startFallback();
     }
   };
