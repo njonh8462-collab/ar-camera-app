@@ -3,344 +3,294 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>AR Ultimate</title>
+<title>AR Hardware Movement + 3D Models</title>
 <style>
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
-  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: Tahoma, sans-serif; color: #fff; touch-action: none; }
-  #video { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; background: #000; }
-  #canvas { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 2; display: block; }
+  body { margin: 0; overflow: hidden; background-color: #000; font-family: Tahoma, sans-serif; color: #fff; }
   
-  #ui { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; background: rgba(0,0,0,0.9); padding: 20px; }
-  .btn { margin: 8px; padding: 16px 32px; font-size: 18px; font-weight: bold; font-family: inherit; color: #fff; background: #2979ff; border: none; border-radius: 30px; box-shadow: 0 4px 15px rgba(41,121,255,0.4); cursor: pointer; transition: 0.2s; }
-  .btn:active { transform: scale(0.95); }
-  .btn-start { background: #ff3d00; margin-top: 25px; font-size: 22px; padding: 20px 60px; }
-  #status { margin-top: 25px; font-size: 15px; text-align: center; color: #b0bec5; line-height: 1.6; }
+  /* رابط کاربری اولیه */
+  #ui-layer {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.85); z-index: 100; padding: 20px; box-sizing: border-box;
+  }
+  .btn-start {
+    padding: 18px 50px; font-size: 20px; font-weight: bold; color: #fff;
+    background: #ff3d00; border: none; border-radius: 30px; cursor: pointer;
+    box-shadow: 0 4px 15px rgba(255,61,0,0.4); margin-bottom: 20px;
+  }
+  .model-uploader {
+    display: flex; flex-direction: column; align-items: center;
+    background: #1f2937; padding: 20px; border-radius: 15px; width: 100%; max-width: 350px;
+  }
+  .model-uploader label {
+    background: #3b82f6; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-weight: bold;
+  }
+  .model-uploader input[type="file"] { display: none; }
+  #model-name { margin-top: 10px; font-size: 14px; color: #9ca3af; direction: ltr; }
+  
+  /* راهنما در حین اجرا */
+  #hint {
+    position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.7); padding: 12px 24px; border-radius: 30px;
+    color: #60a5fa; font-size: 15px; pointer-events: none; z-index: 50;
+    text-align: center; width: max-content; max-width: 90%; display: none;
+  }
 
-  #hint { position: fixed; top: 10%; left: 50%; transform: translateX(-50%); z-index: 15; padding: 12px 24px; border-radius: 30px; background: rgba(0,0,0,0.8); color: #80d8ff; font-size: 15px; text-align: center; pointer-events: none; display: none; opacity: 0; transition: opacity 0.5s; white-space: nowrap; }
-  
-  #joystick-zone { position: fixed; bottom: 30px; left: 30px; width: 140px; height: 140px; z-index: 20; display: none; touch-action: none; }
-  #joystick-base { position: absolute; width: 100%; height: 100%; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; }
-  #joystick-knob { position: absolute; top: 40px; left: 40px; width: 60px; height: 60px; background: rgba(41,121,255,0.9); border-radius: 50%; box-shadow: 0 0 15px rgba(41,121,255,0.6); }
-  
-  #error-box { position: fixed; top: 0; left: 0; right: 0; background: #d50000; color: #fff; padding: 15px; font-family: monospace; direction: ltr; text-align: left; z-index: 9999; display: none; word-wrap: break-word; font-size: 13px; }
+  /* نمایش خطا */
+  #error-box {
+    position: absolute; top: 0; left: 0; width: 100%; background: #dc2626;
+    color: white; padding: 15px; z-index: 1000; text-align: center; display: none;
+  }
 </style>
 </head>
 <body>
+
   <div id="error-box"></div>
-  <script>
-    window.onerror = function(msg, url, line) {
-      var box = document.getElementById('error-box');
-      box.style.display = 'block';
-      box.innerHTML += 'Error: ' + msg + ' (Line ' + line + ')<br>';
-      return false;
-    };
+  
+  <div id="ui-layer">
+    <h1 style="color: #60a5fa; text-align: center;">واقعیت افزوده سخت‌افزاری</h1>
+    
+    <!-- بخش بارگذاری مدل -->
+    <div class="model-uploader">
+      <p style="margin-top: 0; text-align: center; font-size: 14px;">مدل سه‌بعدی خود را انتخاب کنید (فرمت GLB):</p>
+      <label for="model-file">انتخاب فایل مدل (.glb)</label>
+      <input type="file" id="model-file" accept=".glb">
+      <div id="model-name">هنوز مدلی انتخاب نشده است</div>
+    </div>
+
+    <button id="start-ar-btn" class="btn-start" disabled style="opacity:0.5;">ابتدا مدل را انتخاب کنید</button>
+    <p id="support-msg" style="font-size: 13px; color: #9ca3af; text-align: center; margin-top: 15px;"></p>
+  </div>
+
+  <div id="hint">برای قرار دادن مدل روی زمین، گوشی را به سمت زمین بگیرید و صفحه را لمس کنید</div>
+
+  <!-- ایمپورت Three.js از CDN -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
   </script>
 
-  <video id="video" playsinline autoplay muted></video>
-  <canvas id="canvas"></canvas>
-  <div id="hint"></div>
-  
-  <div id="ui">
-    <h1 style="color:#58a6ff; margin-bottom:10px;">واقعیت افزوده نهایی</h1>
-    <p style="color:#8b949e; font-size:14px; text-align:center;">برای بهترین تجربه، از مرورگر کروم استفاده کنید.</p>
-    <button id="btn-start" class="btn btn-start">شروع تجربه</button>
-    <div id="status">آماده راه‌اندازی...</div>
-  </div>
+  <script type="module">
+    import * as THREE from 'three';
+    import { ARButton } from 'three/addons/webxr/ARButton.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-  <div id="joystick-zone">
-    <div id="joystick-base"></div>
-    <div id="joystick-knob"></div>
-  </div>
+    // ==========================================
+    // مدیریت خطا
+    // ==========================================
+    window.addEventListener('error', function(e) {
+      const box = document.getElementById('error-box');
+      box.style.display = 'block';
+      box.innerText = 'خطا: ' + e.message;
+    });
 
-<script>
-(function() {
-  'use strict';
-
-  // ==================== تعریف متغیرها (رفع خطای قبلی) ====================
-  const video = document.getElementById('video'), canvas = document.getElementById('canvas');
-  const ui = document.getElementById('ui'), statusEl = document.getElementById('status'), hintEl = document.getElementById('hint');
-  
-  let gl = null, isXR = false, xrSession = null, xrRefSpace = null;
-  let progLit = null, progSolid = null; // <--- تعریف متغیرهای فراموش شده
-  let litLocs = null, solidLocs = null; // <--- تعریف متغیرهای فراموش شده
-  let objects = [], gridBuf = null, gridCount = 0;
-  let rafId = null, lastTime = 0;
-
-  // حالت پشتیبان (Fallback)
-  let sensorActive = false;
-  let smoothAlpha = 0, smoothBeta = 0, smoothGamma = 0;
-  let camX = 0, camY = -1.6, camZ = 0; 
-  let yaw = 0, pitch = 0, dragging = false, lastX = 0, lastY = 0;
-  const M_APP_TO_EARTH = new Float32Array([1,0,0,0, 0,0,1,0, 0,-1,0,0, 0,0,0,1]);
-
-  // جوی‌استیک
-  let joyActive = false, joyX = 0, joyY = 0;
-  const joyZone = document.getElementById('joystick-zone'), joyKnob = document.getElementById('joystick-knob');
-  let joyCenter = { x: 0, y: 0 };
-
-  // ==================== ریاضیات ماتریس ====================
-  function mat4Mul(a,b){let o=new Float32Array(16);for(let c=0;c<4;c++)for(let r=0;r<4;r++){let s=0;for(let k=0;k<4;k++)s+=a[k*4+r]*b[c*4+k];o[c*4+r]=s;}return o;}
-  function mat4Transpose(m){let o=new Float32Array(16);for(let r=0;r<4;r++)for(let c=0;c<4;c++)o[c*4+r]=m[r*4+c];return o;}
-  function mat4Translate(x,y,z){return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);}
-  function mat4RotX(a){let c=Math.cos(a),s=Math.sin(a);return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);}
-  function mat4RotY(a){let c=Math.cos(a),s=Math.sin(a);return new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]);}
-  function mat4RotZ(a){let c=Math.cos(a),s=Math.sin(a);return new Float32Array([c,s,0,0, -s,c,0,0, 0,0,1,0, 0,0,0,1]);}
-  function mat4Scale(s){return new Float32Array([s,0,0,0, 0,s,0,0, 0,0,s,0, 0,0,0,1]);}
-  function mat4Compose(p,ry,rx,s){let m=mat4Translate(p[0],p[1],p[2]);m=mat4Mul(m,mat4RotY(ry));m=mat4Mul(m,mat4RotX(rx));m=mat4Mul(m,mat4Scale(s));return m;}
-  function mat4Perspective(f,a,n,fa){let t=1.0/Math.tan((f/2)*Math.PI/180);return new Float32Array([t/a,0,0,0, 0,t,0,0, 0,0,(fa+n)/(n-fa),-1, 0,0,(2*fa*n)/(n-fa),0]);}
-
-  // ==================== احجام ====================
-  function makeCube(){let p=0.5,pos=[],nor=[];let f=[[[0,0,1],[[-p,-p,p],[p,-p,p],[p,p,p],[-p,-p,p],[p,p,p],[-p,p,p]]],[[0,0,-1],[[p,-p,-p],[-p,-p,-p],[-p,p,-p],[p,-p,-p],[-p,p,-p],[p,p,-p]]],[[1,0,0],[[p,-p,p],[p,-p,-p],[p,p,-p],[p,-p,p],[p,p,-p],[p,p,p]]],[[-1,0,0],[[-p,-p,-p],[-p,-p,p],[-p,p,p],[-p,-p,-p],[-p,p,p],[-p,p,-p]]],[[0,1,0],[[-p,p,p],[p,p,p],[p,p,-p],[-p,p,p],[p,p,-p],[-p,p,-p]]],[[0,-1,0],[[-p,-p,-p],[p,-p,-p],[p,-p,p],[-p,-p,-p],[p,-p,p],[-p,-p,p]]]];for(let i=0;i<f.length;i++)for(let j=0;j<6;j++){pos.push(f[i][1][j][0],f[i][1][j][1],f[i][1][j][2]);nor.push(f[i][0][0],f[i][0][1],f[i][0][2]);}return{positions:new Float32Array(pos),normals:new Float32Array(nor)};}
-  function makeSphere(r,ls,lo){let pos=[],nor=[];function pt(t,p){let st=Math.sin(t),ct=Math.cos(t),sp=Math.sin(p),cp=Math.cos(p);return{x:r*st*cp,y:r*ct,z:r*st*sp,nx:st*cp,ny:ct,nz:st*sp};}for(let i=0;i<ls;i++){let t0=i*Math.PI/ls,t1=(i+1)*Math.PI/ls;for(let j=0;j<lo;j++){let p0=j*2*Math.PI/lo,p1=(j+1)*2*Math.PI/lo;let a=pt(t0,p0),b=pt(t1,p0),c=pt(t0,p1),d=pt(t1,p1);pos.push(a.x,a.y,a.z,b.x,b.y,b.z,c.x,c.y,c.z);nor.push(a.nx,a.ny,a.nz,b.nx,b.ny,b.nz,c.nx,c.ny,c.nz);pos.push(c.x,c.y,c.z,b.x,b.y,b.z,d.x,d.y,d.z);nor.push(c.nx,c.ny,c.nz,b.nx,b.ny,b.nz,d.nx,d.ny,d.nz);}}return{positions:new Float32Array(pos),normals:new Float32Array(nor)};}
-  function makeTorus(R,r,sr,st){let pos=[],nor=[];function pt(p,t){let cp=Math.cos(p),sp=Math.sin(p),ct=Math.cos(t),st=Math.sin(t);return{x:(R+r*ct)*cp,y:r*st,z:(R+r*ct)*sp,nx:ct*cp,ny:st,nz:ct*sp};}for(let i=0;i<sr;i++){let p0=i/sr*Math.PI*2,p1=(i+1)/sr*Math.PI*2;for(let j=0;j<st;j++){let t0=j/st*Math.PI*2,t1=(j+1)/st*Math.PI*2;let a=pt(p0,t0),b=pt(p1,t0),c=pt(p0,t1),d=pt(p1,t1);pos.push(a.x,a.y,a.z,b.x,b.y,b.z,c.x,c.y,c.z);nor.push(a.nx,a.ny,a.nz,b.nx,b.ny,b.nz,c.nx,c.ny,c.nz);pos.push(c.x,c.y,c.z,b.x,b.y,b.z,d.x,d.y,d.z);nor.push(c.nx,c.ny,c.nz,b.nx,b.ny,b.nz,d.nx,d.ny,d.nz);}}return{positions:new Float32Array(pos),normals:new Float32Array(nor)};}
-  function makeCone(r,h,seg){let pos=[],nor=[],hh=h/2,len=Math.sqrt(h*h+r*r);for(let i=0;i<seg;i++){let a0=i/seg*Math.PI*2,a1=(i+1)/seg*Math.PI*2;let c0=Math.cos(a0),s0=Math.sin(a0),c1=Math.cos(a1),s1=Math.sin(a1);let b0=[r*c0,-hh,r*s0],b1=[r*c1,-hh,r*s1],tip=[0,hh,0];let n0=[c0*h/len,r/len,s0*h/len],n1=[c1*h/len,r/len,s1*h/len];let nx=(n0[0]+n1[0])/2,ny=r/len,nz=(n0[2]+n1[2])/2,nl=Math.sqrt(nx*nx+ny*ny+nz*nz);nx/=nl;ny/=nl;nz/=nl;pos.push(b0[0],b0[1],b0[2],tip[0],tip[1],tip[2],b1[0],b1[1],b1[2]);nor.push(n0[0],n0[1],n0[2],nx,ny,nz,n1[0],n1[1],n1[2]);}for(let k=0;k<seg;k++){let g0=k/seg*Math.PI*2,g1=(k+1)/seg*Math.PI*2;let q0=[r*Math.cos(g0),-hh,r*Math.sin(g0)],q1=[r*Math.cos(g1),-hh,r*Math.sin(g1)];pos.push(0,-hh,0,q1[0],q1[1],q1[2],q0[0],q0[1],q0[2]);nor.push(0,-1,0,0,-1,0,0,-1,0);}return{positions:new Float32Array(pos),normals:new Float32Array(nor)};}
-  function makeGrid(sz,div,y){let pos=[],st=sz/div,half=sz/2;for(let i=0;i<=div;i++){let t=-half+i*st;pos.push(-half,y,t,half,y,t,t,y,-half,t,y,half);}return new Float32Array(pos);}
-
-  // ==================== شیدرها ====================
-  const VS_LIT='attribute vec3 aPos;attribute vec3 aNormal;uniform mat4 uMVP;uniform mat4 uModel;varying vec3 vNormal;varying vec3 vWorldPos;void main(){vNormal=mat3(uModel)*aNormal;vWorldPos=(uModel*vec4(aPos,1.0)).xyz;gl_Position=uMVP*vec4(aPos,1.0);}';
-  const FS_LIT='precision highp float;varying vec3 vNormal;varying vec3 vWorldPos;uniform vec3 uColor;uniform vec3 uLightDir;uniform vec3 uEyePos;uniform float uEmissive;void main(){vec3 N=normalize(vNormal);vec3 L=normalize(uLightDir);vec3 V=normalize(uEyePos-vWorldPos);vec3 H=normalize(L+V);float diff=max(dot(N,L),0.0);float spec=pow(max(dot(N,H),0.0),40.0);vec3 base=uColor*(0.35+0.75*diff)+vec3(1.0)*spec*0.6;base=mix(base,uColor*1.4+0.05,uEmissive);gl_FragColor=vec4(base,1.0);}';
-  const VS_SOLID='attribute vec3 aPos;uniform mat4 uMVP;void main(){gl_Position=uMVP*vec4(aPos,1.0);}';
-  const FS_SOLID='precision highp float;uniform vec4 uColor;void main(){gl_FragColor=vec4(uColor.rgb*uColor.a,uColor.a);}';
-
-  // ==================== WebGL ====================
-  function setupGL(){
-    try {
-      const opt={alpha:true,antialias:true,premultipliedAlpha:true,depth:true,powerPreference:"high-performance"};
-      gl=canvas.getContext('webgl',opt)||canvas.getContext('experimental-webgl',opt);
-      if(!gl) throw new Error('WebGL در این مرورگر پشتیبانی نمی‌شود.');
-      
-      progLit=createProgram(gl,VS_LIT,FS_LIT);
-      litLocs={aPos:gl.getAttribLocation(progLit,'aPos'),aNormal:gl.getAttribLocation(progLit,'aNormal'),uMVP:gl.getUniformLocation(progLit,'uMVP'),uModel:gl.getUniformLocation(progLit,'uModel'),uColor:gl.getUniformLocation(progLit,'uColor'),uLightDir:gl.getUniformLocation(progLit,'uLightDir'),uEyePos:gl.getUniformLocation(progLit,'uEyePos'),uEmissive:gl.getUniformLocation(progLit,'uEmissive')};
-      
-      progSolid=createProgram(gl,VS_SOLID,FS_SOLID);
-      solidLocs={aPos:gl.getAttribLocation(progSolid,'aPos'),uMVP:gl.getUniformLocation(progSolid,'uMVP'),uColor:gl.getUniformLocation(progSolid,'uColor')};
-    } catch(e) {
-      console.error(e);
-      statusEl.textContent = 'خطا در راه‌اندازی گرافیک: ' + e.message;
-      throw e;
-    }
-  }
-  
-  function buildScene(){
-    objects=[];
-    objects.push({mesh:createMesh(gl,makeCube()),position:[1.5,0,-2.5],rotY:0.3,rotX:0.2,rotSpeedY:0.7,rotSpeedX:0.3,color:[1,0.32,0.32],emissive:0.15});
-    objects.push({mesh:createMesh(gl,makeSphere(0.35,24,32)),position:[-1.5,0.5,-2.0],rotY:0,rotX:0,rotSpeedY:-0.5,rotSpeedX:0.4,color:[0.27,0.54,1],emissive:0.15});
-    objects.push({mesh:createMesh(gl,makeTorus(0.45,0.15,32,48)),position:[0.5,0.2,-3.5],rotY:0,rotX:Math.PI/4,rotSpeedY:0.6,rotSpeedX:0.2,color:[1,0.84,0.25],emissive:0.2});
-    objects.push({mesh:createMesh(gl,makeCone(0.38,0.75,32)),position:[-2.5,0.1,-4.0],rotY:0,rotX:0,rotSpeedY:0.5,rotSpeedX:0.15,color:[0.41,0.94,0.68],emissive:0.15});
-    gridBuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,gridBuf);
-    const g=makeGrid(20,40,0);gl.bufferData(gl.ARRAY_BUFFER,g,gl.STATIC_DRAW);gridCount=g.length/3;
-  }
-  
-  function compileShader(c,t,s){const sh=c.createShader(t);c.shaderSource(sh,s);c.compileShader(sh);if(!c.getShaderParameter(sh,c.COMPILE_STATUS))throw new Error(c.getShaderInfoLog(sh));return sh;}
-  function createProgram(c,vs,fs){const p=c.createProgram();c.attachShader(p,compileShader(c,c.VERTEX_SHADER,vs));c.attachShader(p,compileShader(c,c.FRAGMENT_SHADER,fs));c.linkProgram(p);if(!c.getProgramParameter(p,c.LINK_STATUS))throw new Error(c.getProgramInfoLog(p));return p;}
-  function createMesh(c,g){const pb=c.createBuffer();c.bindBuffer(c.ARRAY_BUFFER,pb);c.bufferData(c.ARRAY_BUFFER,g.positions,c.STATIC_DRAW);const nb=c.createBuffer();c.bindBuffer(c.ARRAY_BUFFER,nb);c.bufferData(c.ARRAY_BUFFER,g.normals,c.STATIC_DRAW);return{posBuf:pb,norBuf:nb,count:g.positions.length/3};}
-
-  // ==================== رندر ====================
-  function drawScene(viewMatrix, projMatrix, time) {
-    if(!gl) return;
-    const t=time*0.001,dt=lastTime?Math.min(t-lastTime,0.1):0;lastTime=t;
-    for(let i=0;i<objects.length;i++){const o=objects[i];o.rotY+=o.rotSpeedY*dt;o.rotX+=o.rotSpeedX*dt;o.matrix=mat4Compose(o.position,o.rotY,o.rotX,1);}
-    const vp = mat4Mul(projMatrix, viewMatrix);
+    // ==========================================
+    // بررسی پشتیبانی WebXR
+    // ==========================================
+    const supportMsg = document.getElementById('support-msg');
+    const startBtn = document.getElementById('start-ar-btn');
+    const uiLayer = document.getElementById('ui-layer');
+    const hint = document.getElementById('hint');
     
-    if(!isXR && progSolid) {
-      gl.useProgram(progSolid);gl.uniformMatrix4fv(solidLocs.uMVP,false,vp);gl.uniform4fv(solidLocs.uColor,[0,0.9,1,0.4]);
-      gl.depthMask(false);gl.bindBuffer(gl.ARRAY_BUFFER,gridBuf);gl.enableVertexAttribArray(solidLocs.aPos);
-      gl.vertexAttribPointer(solidLocs.aPos,3,gl.FLOAT,false,0,0);gl.drawArrays(gl.LINES,0,gridCount);gl.depthMask(true);
-    }
-    
-    gl.useProgram(progLit);
-    for(let j=0;j<objects.length;j++){
-      const ob=objects[j];gl.uniformMatrix4fv(litLocs.uMVP,false,mat4Mul(vp,ob.matrix));gl.uniformMatrix4fv(litLocs.uModel,false,ob.matrix);
-      gl.uniform3fv(litLocs.uColor,ob.color);gl.uniform3fv(litLocs.uLightDir,[0.5,0.8,0.6]);gl.uniform3fv(litLocs.uEyePos,[0,0,0]);gl.uniform1f(litLocs.uEmissive,ob.emissive);
-      gl.bindBuffer(gl.ARRAY_BUFFER,ob.mesh.posBuf);gl.enableVertexAttribArray(litLocs.aPos);gl.vertexAttribPointer(litLocs.aPos,3,gl.FLOAT,false,0,0);
-      gl.bindBuffer(gl.ARRAY_BUFFER,ob.mesh.norBuf);gl.enableVertexAttribArray(litLocs.aNormal);gl.vertexAttribPointer(litLocs.aNormal,3,gl.FLOAT,false,0,0);
-      gl.drawArrays(gl.TRIANGLES,0,ob.mesh.count);
-    }
-  }
+    let isWebXRSupported = false;
 
-  // ==================== WebXR (AR واقعی) ====================
-  async function startXR() {
-    try {
-      xrSession = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'] });
-      xrSession.addEventListener('end', () => {
-        xrSession = null; isXR = false; video.style.display = 'none';
-        ui.style.display = 'flex'; statusEl.textContent = 'جلسه AR پایان یافت.';
-        if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-      });
-      
-      gl = canvas.getContext('webgl', { xrCompatible: true });
-      await gl.makeXRCompatible();
-      xrSession.updateRenderState({ baseLayer: new XRWebGLLayer(xrSession, gl) });
-      
-      // تلاش برای گرفتن local-floor یا local
-      try {
-        xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
-      } catch (e) {
-        xrRefSpace = await xrSession.requestReferenceSpace('local');
-      }
-      
-      setupGL();
-      buildScene();
-      
-      ui.style.display = 'none';
-      hintEl.textContent = 'حرکت در فضای واقعی فعال است. گوشی را جابجا کنید.';
-      hintEl.style.display = 'block'; hintEl.style.opacity = '1';
-      setTimeout(() => { hintEl.style.opacity = '0'; }, 6000);
-      
-      xrSession.requestAnimationFrame(onXRFrame);
-    } catch(err) {
-      console.warn('WebXR failed:', err);
-      startFallback();
-    }
-  }
-
-  function onXRFrame(time, frame) {
-    xrSession.requestAnimationFrame(onXRFrame);
-    const pose = frame.getViewerPose(xrRefSpace);
-    if (!pose) return;
-    const layer = xrSession.renderState.baseLayer;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
-    gl.clearColor(0,0,0,0); gl.clearDepth(1);
-    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE);
-    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    
-    for (const view of pose.views) {
-      const viewport = layer.getViewport(view);
-      gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
-      drawScene(view.transform.inverse.matrix, view.projectionMatrix, time);
-    }
-  }
-
-  // ==================== حالت پشتیبان (دوربین + سنسور + جوی‌استیک) ====================
-  function startFallback() {
-    isXR = false;
-    joyZone.style.display = 'block'; 
-    
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } })
-      .then(function(s) {
-        video.srcObject = s; video.play().catch(()=>{}); video.style.display = 'block';
-        
-        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-          DeviceOrientationEvent.requestPermission().then(function(p) {
-            if (p === 'granted') window.addEventListener('deviceorientation', onOrient, true);
-          }).catch(()=>{});
+    if ('xr' in navigator) {
+      navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+        isWebXRSupported = supported;
+        if (!supported) {
+          supportMsg.innerHTML = '⚠️ مرورگر یا گوشی شما از AR سخت‌افزاری (WebXR) پشتیبانی نمی‌کند. برای حرکت واقعی در فضا، از گوشی اندروید با مرورگر Chrome استفاده کنید.';
+          supportMsg.style.color = '#ef4444';
         } else {
-          window.addEventListener('deviceorientation', onOrient, true);
+          supportMsg.innerHTML = '✅ سخت‌افزار شما از AR پشتیبانی می‌کند.';
+          supportMsg.style.color = '#10b981';
+        }
+      });
+    } else {
+      supportMsg.innerHTML = '⚠️ مرورگر شما از WebXR پشتیبانی نمی‌کند (مثلاً در iOS).';
+      supportMsg.style.color = '#ef4444';
+    }
+
+    // ==========================================
+    // مدیریت آپلود مدل
+    // ==========================================
+    let loadedModel = null;
+    const modelFileInput = document.getElementById('model-file');
+    const modelNameDiv = document.getElementById('model-name');
+
+    modelFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      modelNameDiv.innerText = file.name;
+      modelNameDiv.style.color = '#f59e0b';
+      
+      const loader = new GLTFLoader();
+      const url = URL.createObjectURL(file);
+
+      loader.load(url, (gltf) => {
+        loadedModel = gltf.scene;
+        
+        // تنظیم مقیاس مدل (چون مدل‌ها سایزهای مختلفی دارند)
+        // این بخش را می‌توانید دستی تغییر دهید
+        loadedModel.scale.set(0.5, 0.5, 0.5); 
+        
+        modelNameDiv.innerText = 'آماده است: ' + file.name;
+        modelNameDiv.style.color = '#10b981';
+        startBtn.disabled = false;
+        startBtn.style.opacity = '1';
+        startBtn.innerText = 'شروع AR';
+      }, undefined, (err) => {
+        console.error(err);
+        modelNameDiv.innerText = 'خطا در خواندن فایل';
+        modelNameDiv.style.color = '#ef4444';
+      });
+    });
+
+    // ==========================================
+    // راه‌اندازی Three.js
+    // ==========================================
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+    
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    
+    // اضافه کردن Canvas به DOM (مخفی تا زمانی که AR شروع شود)
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.top = '0';
+    renderer.domElement.style.left = '0';
+    renderer.domElement.style.zIndex = '1';
+    document.body.appendChild(renderer.domElement);
+
+    // نورپردازی
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3);
+    hemiLight.position.set(0.5, 1, 0.25);
+    scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xffffff, 2);
+    dirLight.position.set(1, 2, 1);
+    scene.add(dirLight);
+
+    // ==========================================
+    // Hit Test (تشخیص سطح زمین)
+    // ==========================================
+    let hitTestSource = null;
+    let hitTestSourceRequested = false;
+    let reticle = new THREE.Mesh(
+      new THREE.RingGeometry(0.1, 0.12, 32).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 })
+    );
+    reticle.matrixAutoUpdate = false;
+    reticle.visible = false;
+    scene.add(reticle);
+
+    let placedModel = null;
+
+    // ==========================================
+    // دکمه شروع AR
+    // ==========================================
+    startBtn.addEventListener('click', async () => {
+      if (!isWebXRSupported) {
+        alert('سخت‌افزار شما از AR پشتیبانی نمی‌کند.');
+        return;
+      }
+
+      try {
+        uiLayer.style.display = 'none';
+        hint.style.display = 'block';
+        setTimeout(() => { hint.style.opacity = '0'; }, 6000);
+
+        const session = await navigator.xr.requestSession('immersive-ar', {
+          requiredFeatures: ['hit-test', 'local-floor']
+        });
+        
+        renderer.xr.setSession(session);
+        session.addEventListener('end', () => {
+          uiLayer.style.display = 'flex';
+          hint.style.display = 'none';
+          if (placedModel) { scene.remove(placedModel); placedModel = null; }
+        });
+      } catch (err) {
+        console.error(err);
+        alert('خطا در راه‌اندازی AR: ' + err.message);
+        uiLayer.style.display = 'flex';
+      }
+    });
+
+    // ==========================================
+    // حلقه رندر (WebXR)
+    // ==========================================
+    renderer.setAnimationLoop((timestamp, frame) => {
+      if (frame) {
+        // مدیریت Hit Test
+        if (!hitTestSourceRequested) {
+          frame.session.requestReferenceSpace('viewer').then((referenceSpace) => {
+            frame.session.requestHitTestSource({ space: referenceSpace }).then((source) => {
+              hitTestSource = source;
+            });
+          });
+          frame.session.addEventListener('end', () => {
+            hitTestSourceRequested = false;
+            hitTestSource = null;
+          });
+          hitTestSourceRequested = true;
         }
 
-        setupGL(); buildScene(); resize();
-        window.addEventListener('resize', resize);
-        
-        canvas.addEventListener('pointerdown', onDown, { passive: false });
-        canvas.addEventListener('pointermove', onMove, { passive: false });
-        canvas.addEventListener('pointerup', onUp, { passive: false });
-        canvas.addEventListener('pointercancel', onUp, { passive: false });
+        if (hitTestSource) {
+          const referenceSpace = renderer.xr.getReferenceSpace();
+          const hitTestResults = frame.getHitTestResults(hitTestSource);
 
-        joyZone.addEventListener('pointerdown', onJoyDown, { passive: false });
-        joyZone.addEventListener('pointermove', onJoyMove, { passive: false });
-        joyZone.addEventListener('pointerup', onJoyUp, { passive: false });
+          if (hitTestResults.length) {
+            const hit = hitTestResults[0];
+            const pose = hit.getPose(referenceSpace);
 
-        ui.style.display = 'none';
-        hintEl.textContent = 'برای چرخش انگشت بکشید / با جوی‌استیک حرکت کنید';
-        hintEl.style.display = 'block';
-        requestAnimationFrame(()=>{ hintEl.style.opacity = '1'; });
-        setTimeout(()=>{ hintEl.style.opacity = '0'; }, 6000);
-
-        lastTime = 0;
-        renderFallback();
-      }).catch(function(err) {
-        statusEl.textContent = 'خطا در دسترسی به دوربین: ' + err.message;
-      });
-  }
-
-  function onOrient(e) {
-    if (e.alpha === null || e.beta === null || e.gamma === null) return;
-    const f = 0.15; 
-    if (!sensorActive) {
-      smoothAlpha = e.alpha; smoothBeta = e.beta; smoothGamma = e.gamma;
-      sensorActive = true;
-    } else {
-      let dAlpha = e.alpha - smoothAlpha;
-      if (dAlpha > 180) dAlpha -= 360; if (dAlpha < -180) dAlpha += 360;
-      smoothAlpha += dAlpha * f;
-      smoothBeta += (e.beta - smoothBeta) * f;
-      smoothGamma += (e.gamma - smoothGamma) * f;
-    }
-  }
-
-  function screenAngle() { const d = (screen.orientation && screen.orientation.angle) || window.orientation || 0; return (((d%360)+360)%360)*Math.PI/180; }
-  
-  function sensorView() { 
-    const d=Math.PI/180; 
-    const R=mat4Mul(mat4RotZ(smoothAlpha*d),mat4Mul(mat4RotX(smoothBeta*d),mat4RotY(smoothGamma*d))); 
-    return mat4Mul(mat4RotZ(screenAngle()),mat4Mul(mat4Transpose(R),M_APP_TO_EARTH)); 
-  }
-  
-  function fallbackView() { 
-    const rot = mat4Mul(mat4RotX(-pitch),mat4RotY(-yaw));
-    const trans = mat4Translate(-camX, -camY, -camZ);
-    return mat4Mul(rot, trans);
-  }
-
-  function renderFallback() {
-    rafId = requestAnimationFrame(renderFallback);
-    const speed = 2.5; 
-    const dt = lastTime ? Math.min(performance.now()*0.001 - lastTime, 0.1) : 0;
-    
-    if (Math.abs(joyX) > 0.05 || Math.abs(joyY) > 0.05) {
-      const moveForward = -joyY;
-      const moveRight = joyX;
-      camX += (Math.sin(yaw) * moveForward + Math.cos(yaw) * moveRight) * speed * dt;
-      camZ += (Math.cos(yaw) * moveForward - Math.sin(yaw) * moveRight) * speed * dt;
-    }
-
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clearColor(0,0,0,0); gl.clearDepth(1);
-    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL); gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    
-    const view = sensorActive ? mat4Mul(mat4Translate(-camX, -camY, -camZ), sensorView()) : fallbackView();
-    const proj = mat4Perspective(70, canvas.width / Math.max(1, canvas.height), 0.1, 100);
-    
-    drawScene(view, proj, performance.now());
-  }
-
-  function onDown(e) { if (e.target === joyZone || e.target === joyKnob) return; dragging = true; lastX = e.clientX; lastY = e.clientY; }
-  function onMove(e) { if (!dragging) return; const dx = e.clientX - lastX, dy = e.clientY - lastY; lastX = e.clientX; lastY = e.clientY; yaw -= dx * 0.005; pitch = Math.max(-1.5, Math.min(1.5, pitch - dy * 0.005)); }
-  function onUp() { dragging = false; }
-
-  function onJoyDown(e) { e.preventDefault(); joyActive = true; const rect = joyZone.getBoundingClientRect(); joyCenter.x = rect.left + rect.width / 2; joyCenter.y = rect.top + rect.height / 2; onJoyMove(e); }
-  function onJoyMove(e) {
-    if (!joyActive) return; e.preventDefault();
-    let dx = e.clientX - joyCenter.x; let dy = e.clientY - joyCenter.y;
-    const maxDist = 50; const dist = Math.sqrt(dx*dx + dy*dy);
-    if (dist > maxDist) { dx = (dx/dist)*maxDist; dy = (dy/dist)*maxDist; }
-    joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
-    joyX = dx / maxDist; joyY = dy / maxDist;
-  }
-  function onJoyUp(e) { e.preventDefault(); joyActive = false; joyX = 0; joyY = 0; joyKnob.style.transform = 'translate(0px, 0px)'; }
-
-  function resize() { const d = Math.min(window.devicePixelRatio || 1, 2); canvas.width = Math.round(window.innerWidth * d); canvas.height = Math.round(window.innerHeight * d); canvas.style.width = window.innerWidth + 'px'; canvas.style.height = window.innerHeight + 'px'; }
-
-  // ==================== شروع برنامه ====================
-  document.getElementById('btn-start').onclick = async function() {
-    this.disabled = true;
-    this.textContent = 'در حال راه‌اندازی...';
-    statusEl.textContent = 'در حال بررسی سخت‌افزار...';
-
-    try {
-      if (navigator.xr && await navigator.xr.isSessionSupported('immersive-ar')) {
-        isXR = true;
-        await startXR();
-      } else {
-        startFallback();
+            reticle.visible = true;
+            reticle.matrix.fromArray(pose.transform.matrix);
+          } else {
+            reticle.visible = false;
+          }
+        }
       }
-    } catch (e) {
-      startFallback();
-    }
-  };
-})();
-</script>
+
+      // رندر صحنه
+      renderer.render(scene, camera);
+    });
+
+    // ==========================================
+    // لمس صفحه برای قرار دادن مدل
+    // ==========================================
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      if (reticle.visible && loadedModel) {
+        // اگر مدلی قبلاً قرار داده شده، حذفش کن
+        if (placedModel) {
+          scene.remove(placedModel);
+        }
+        
+        // کلون کردن مدل و قرار دادن در مکان جدید
+        placedModel = loadedModel.clone();
+        
+        // استخراج موقعیت از reticle
+        placedModel.position.setFromMatrixPosition(reticle.matrix);
+        placedModel.quaternion.setFromRotationMatrix(reticle.matrix);
+        
+        scene.add(placedModel);
+      }
+    });
+
+    // ==========================================
+    // مدیریت ریسایز
+    // ==========================================
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
 </body>
 </html>
