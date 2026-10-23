@@ -3,43 +3,46 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>AR Hardware Movement + 3D Models</title>
+<title>AR Hardware Sensor + Model</title>
 <style>
   body { margin: 0; overflow: hidden; background-color: #000; font-family: Tahoma, sans-serif; color: #fff; }
   
-  /* رابط کاربری اولیه */
+  /* صفحه رابط کاربری */
   #ui-layer {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    background: rgba(0,0,0,0.85); z-index: 100; padding: 20px; box-sizing: border-box;
+    background: rgba(0,0,0,0.9); z-index: 100; padding: 20px; box-sizing: border-box;
   }
   .btn-start {
     padding: 18px 50px; font-size: 20px; font-weight: bold; color: #fff;
     background: #ff3d00; border: none; border-radius: 30px; cursor: pointer;
-    box-shadow: 0 4px 15px rgba(255,61,0,0.4); margin-bottom: 20px;
+    box-shadow: 0 4px 15px rgba(255,61,0,0.4); margin-top: 20px;
   }
-  .model-uploader {
+  .btn-start:disabled { background: #555; box-shadow: none; cursor: not-allowed; }
+  
+  .upload-box {
     display: flex; flex-direction: column; align-items: center;
     background: #1f2937; padding: 20px; border-radius: 15px; width: 100%; max-width: 350px;
   }
-  .model-uploader label {
-    background: #3b82f6; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-weight: bold;
+  .upload-label {
+    background: #3b82f6; padding: 15px 30px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 16px;
+    box-shadow: 0 4px 10px rgba(59,130,246,0.3);
   }
-  .model-uploader input[type="file"] { display: none; }
-  #model-name { margin-top: 10px; font-size: 14px; color: #9ca3af; direction: ltr; }
+  #model-file { display: none; }
+  #model-status { margin-top: 15px; font-size: 14px; color: #9ca3af; direction: ltr; text-align: center; }
   
-  /* راهنما در حین اجرا */
+  /* راهنما */
   #hint {
     position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-    background: rgba(0,0,0,0.7); padding: 12px 24px; border-radius: 30px;
+    background: rgba(0,0,0,0.8); padding: 12px 24px; border-radius: 30px;
     color: #60a5fa; font-size: 15px; pointer-events: none; z-index: 50;
-    text-align: center; width: max-content; max-width: 90%; display: none;
+    text-align: center; width: max-content; max-width: 90%; display: none; transition: opacity 0.5s;
   }
 
   /* نمایش خطا */
   #error-box {
     position: absolute; top: 0; left: 0; width: 100%; background: #dc2626;
-    color: white; padding: 15px; z-index: 1000; text-align: center; display: none;
+    color: white; padding: 15px; z-index: 1000; text-align: center; display: none; font-family: monospace; font-size: 13px;
   }
 </style>
 </head>
@@ -48,23 +51,22 @@
   <div id="error-box"></div>
   
   <div id="ui-layer">
-    <h1 style="color: #60a5fa; text-align: center;">واقعیت افزوده سخت‌افزاری</h1>
+    <h1 style="color: #60a5fa; text-align: center;">واقعیت افزوده با سنسور</h1>
     
-    <!-- بخش بارگذاری مدل -->
-    <div class="model-uploader">
-      <p style="margin-top: 0; text-align: center; font-size: 14px;">مدل سه‌بعدی خود را انتخاب کنید (فرمت GLB):</p>
-      <label for="model-file">انتخاب فایل مدل (.glb)</label>
+    <div class="upload-box">
+      <p style="margin-top: 0; text-align: center; font-size: 15px;">مدل سه‌بعدی خود را انتخاب کنید (فرمت GLB):</p>
+      <label for="model-file" class="upload-label">📂 آپلود فایل مدل</label>
       <input type="file" id="model-file" accept=".glb">
-      <div id="model-name">هنوز مدلی انتخاب نشده است</div>
+      <div id="model-status">هنوز فایلی انتخاب نشده است</div>
     </div>
 
-    <button id="start-ar-btn" class="btn-start" disabled style="opacity:0.5;">ابتدا مدل را انتخاب کنید</button>
-    <p id="support-msg" style="font-size: 13px; color: #9ca3af; text-align: center; margin-top: 15px;"></p>
+    <button id="start-btn" class="btn-start" disabled>شروع تجربه</button>
+    <p id="support-msg" style="font-size: 13px; color: #9ca3af; text-align: center; margin-top: 20px;"></p>
   </div>
 
-  <div id="hint">برای قرار دادن مدل روی زمین، گوشی را به سمت زمین بگیرید و صفحه را لمس کنید</div>
+  <div id="hint">برای قرار دادن مدل، گوشی را به سمت زمین بگیرید و صفحه را لمس کنید</div>
 
-  <!-- ایمپورت Three.js از CDN -->
+  <!-- ایمپورت Three.js -->
   <script type="importmap">
     {
       "imports": {
@@ -76,11 +78,10 @@
 
   <script type="module">
     import * as THREE from 'three';
-    import { ARButton } from 'three/addons/webxr/ARButton.js';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
     // ==========================================
-    // مدیریت خطا
+    // مدیریت خطاها
     // ==========================================
     window.addEventListener('error', function(e) {
       const box = document.getElementById('error-box');
@@ -88,45 +89,44 @@
       box.innerText = 'خطا: ' + e.message;
     });
 
-    // ==========================================
-    // بررسی پشتیبانی WebXR
-    // ==========================================
     const supportMsg = document.getElementById('support-msg');
-    const startBtn = document.getElementById('start-ar-btn');
+    const startBtn = document.getElementById('start-btn');
     const uiLayer = document.getElementById('ui-layer');
     const hint = document.getElementById('hint');
+    const modelStatus = document.getElementById('model-status');
     
     let isWebXRSupported = false;
+    let loadedModel = null;
+    let placedModel = null;
 
+    // ==========================================
+    // بررسی سخت‌افزار (WebXR)
+    // ==========================================
     if ('xr' in navigator) {
       navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
         isWebXRSupported = supported;
-        if (!supported) {
-          supportMsg.innerHTML = '⚠️ مرورگر یا گوشی شما از AR سخت‌افزاری (WebXR) پشتیبانی نمی‌کند. برای حرکت واقعی در فضا، از گوشی اندروید با مرورگر Chrome استفاده کنید.';
-          supportMsg.style.color = '#ef4444';
-        } else {
-          supportMsg.innerHTML = '✅ سخت‌افزار شما از AR پشتیبانی می‌کند.';
+        if (supported) {
+          supportMsg.innerHTML = '✅ سخت‌افزار شما از AR واقعی (WebXR) پشتیبانی می‌کند.';
           supportMsg.style.color = '#10b981';
+        } else {
+          supportMsg.innerHTML = '⚠️ گوشی شما WebXR ندارد. برنامه در حالت سنسور (چرخش با ژیروسکوپ) اجرا می‌شود.';
+          supportMsg.style.color = '#f59e0b';
         }
       });
     } else {
-      supportMsg.innerHTML = '⚠️ مرورگر شما از WebXR پشتیبانی نمی‌کند (مثلاً در iOS).';
-      supportMsg.style.color = '#ef4444';
+      supportMsg.innerHTML = '⚠️ مرورگر شما از WebXR پشتیبانی نمی‌کند. برنامه در حالت سنسور اجرا می‌شود.';
+      supportMsg.style.color = '#f59e0b';
     }
 
     // ==========================================
-    // مدیریت آپلود مدل
+    // آپلود مدل
     // ==========================================
-    let loadedModel = null;
-    const modelFileInput = document.getElementById('model-file');
-    const modelNameDiv = document.getElementById('model-name');
-
-    modelFileInput.addEventListener('change', (e) => {
+    document.getElementById('model-file').addEventListener('change', (e) => {
       const file = e.target.files[0];
       if (!file) return;
 
-      modelNameDiv.innerText = file.name;
-      modelNameDiv.style.color = '#f59e0b';
+      modelStatus.innerText = 'در حال بارگذاری...';
+      modelStatus.style.color = '#f59e0b';
       
       const loader = new GLTFLoader();
       const url = URL.createObjectURL(file);
@@ -134,19 +134,22 @@
       loader.load(url, (gltf) => {
         loadedModel = gltf.scene;
         
-        // تنظیم مقیاس مدل (چون مدل‌ها سایزهای مختلفی دارند)
-        // این بخش را می‌توانید دستی تغییر دهید
-        loadedModel.scale.set(0.5, 0.5, 0.5); 
+        // تنظیم مقیاس خودکار (چون ممکن است مدل خیلی بزرگ یا کوچک باشد)
+        const box = new THREE.Box3().setFromObject(loadedModel);
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scale = 0.5 / maxDim; // هدف: 50 سانتی‌متر
+        loadedModel.scale.set(scale, scale, scale);
         
-        modelNameDiv.innerText = 'آماده است: ' + file.name;
-        modelNameDiv.style.color = '#10b981';
+        modelStatus.innerText = '✅ مدل با موفقیت بارگذاری شد.';
+        modelStatus.style.color = '#10b981';
+        
         startBtn.disabled = false;
-        startBtn.style.opacity = '1';
-        startBtn.innerText = 'شروع AR';
+        startBtn.innerText = 'شروع تجربه';
       }, undefined, (err) => {
         console.error(err);
-        modelNameDiv.innerText = 'خطا در خواندن فایل';
-        modelNameDiv.style.color = '#ef4444';
+        modelStatus.innerText = '❌ خطا در خواندن فایل. آیا فرمت GLB است؟';
+        modelStatus.style.color = '#ef4444';
       });
     });
 
@@ -161,7 +164,6 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.xr.enabled = true;
     
-    // اضافه کردن Canvas به DOM (مخفی تا زمانی که AR شروع شود)
     renderer.domElement.style.position = 'absolute';
     renderer.domElement.style.top = '0';
     renderer.domElement.style.left = '0';
@@ -178,7 +180,7 @@
     scene.add(dirLight);
 
     // ==========================================
-    // Hit Test (تشخیص سطح زمین)
+    // متغیرهای AR
     // ==========================================
     let hitTestSource = null;
     let hitTestSourceRequested = false;
@@ -190,45 +192,152 @@
     reticle.visible = false;
     scene.add(reticle);
 
-    let placedModel = null;
+    // ==========================================
+    // حالت سنسور (Fallback - بدون WebXR)
+    // ==========================================
+    let fallbackVideo = null;
+    let fallbackActive = false;
+    let smoothAlpha = 0, smoothBeta = 0, smoothGamma = 0;
+    let sensorInitialized = false;
+    let fallbackTargetPosition = new THREE.Vector3(0, 0, -1.5); // 1.5 متر جلوتر
+    let fallbackHasPlaced = false;
+
+    function startFallback() {
+      fallbackActive = true;
+      uiLayer.style.display = 'none';
+      hint.style.display = 'block';
+      hint.innerText = 'گوشی را بچرخانید. برای قرار دادن مدل روی زمین، صفحه را لمس کنید.';
+      setTimeout(() => { hint.style.opacity = '0'; }, 6000);
+
+      // ساخت ویدیو
+      fallbackVideo = document.createElement('video');
+      fallbackVideo.setAttribute('playsinline', '');
+      fallbackVideo.setAttribute('autoplay', '');
+      fallbackVideo.setAttribute('muted', '');
+      fallbackVideo.style.position = 'absolute';
+      fallbackVideo.style.top = '0';
+      fallbackVideo.style.left = '0';
+      fallbackVideo.style.width = '100%';
+      fallbackVideo.style.height = '100%';
+      fallbackVideo.style.objectFit = 'cover';
+      fallbackVideo.style.zIndex = '0';
+      document.body.appendChild(fallbackVideo);
+
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } })
+        .then((stream) => {
+          fallbackVideo.srcObject = stream;
+          fallbackVideo.play();
+        }).catch(err => {
+          alert('خطا در دوربین: ' + err.message);
+        });
+
+      // گوش دادن به سنسور
+      window.addEventListener('deviceorientation', onFallbackOrientation, true);
+      
+      // لمس برای قرار دادن مدل
+      renderer.domElement.addEventListener('pointerdown', onFallbackPlaceModel);
+
+      // حلقه رندر
+      renderer.setAnimationLoop(renderFallback);
+    }
+
+    function onFallbackOrientation(e) {
+      if (e.alpha === null || e.beta === null || e.gamma === null) return;
+      const f = 0.1; // فیلتر نرم‌کننده
+      if (!sensorInitialized) {
+        smoothAlpha = e.alpha; smoothBeta = e.beta; smoothGamma = e.gamma;
+        sensorInitialized = true;
+      } else {
+        let dAlpha = e.alpha - smoothAlpha;
+        if (dAlpha > 180) dAlpha -= 360; if (dAlpha < -180) dAlpha += 360;
+        smoothAlpha += dAlpha * f;
+        smoothBeta += (e.beta - smoothBeta) * f;
+        smoothGamma += (e.gamma - smoothGamma) * f;
+      }
+    }
+
+    function renderFallback() {
+      if (!fallbackActive) return;
+      
+      // تنظیم چرخش دوربین بر اساس سنسور
+      if (sensorInitialized) {
+        const d = Math.PI / 180;
+        const orient = ((screen.orientation && screen.orientation.angle) || window.orientation || 0) * d;
+        
+        // ساخت کواترنیون از سنسور
+        const euler = new THREE.Euler();
+        euler.set(smoothBeta * d, smoothAlpha * d, -smoothGamma * d, 'YXZ');
+        
+        // اعمال چرخش صفحه
+        camera.quaternion.setFromEuler(euler);
+        camera.rotateZ(-orient);
+      }
+      
+      renderer.render(scene, camera);
+    }
+
+    function onFallbackPlaceModel(e) {
+      if (!loadedModel || fallbackHasPlaced) return;
+      
+      // قرار دادن مدل 1.5 متر جلوتر از دوربین
+      const direction = new THREE.Vector3(0, 0, -1);
+      direction.applyQuaternion(camera.quaternion);
+      
+      const position = camera.position.clone().add(direction.multiplyScalar(1.5));
+      
+      placedModel = loadedModel.clone();
+      placedModel.position.copy(position);
+      
+      // پایین آوردن مدل روی زمین
+      placedModel.position.y = -1.5; 
+      
+      scene.add(placedModel);
+      fallbackHasPlaced = true;
+      hint.innerText = 'مدل قرار گرفت!';
+      setTimeout(() => { hint.style.opacity = '0'; }, 2000);
+    }
 
     // ==========================================
-    // دکمه شروع AR
+    // شروع WebXR (حرکت واقعی سخت‌افزاری)
     // ==========================================
     startBtn.addEventListener('click', async () => {
-      if (!isWebXRSupported) {
-        alert('سخت‌افزار شما از AR پشتیبانی نمی‌کند.');
-        return;
-      }
+      if (!loadedModel) return;
 
-      try {
-        uiLayer.style.display = 'none';
-        hint.style.display = 'block';
-        setTimeout(() => { hint.style.opacity = '0'; }, 6000);
+      if (isWebXRSupported) {
+        try {
+          uiLayer.style.display = 'none';
+          hint.style.display = 'block';
+          setTimeout(() => { hint.style.opacity = '0'; }, 6000);
 
-        const session = await navigator.xr.requestSession('immersive-ar', {
-          requiredFeatures: ['hit-test', 'local-floor']
-        });
-        
-        renderer.xr.setSession(session);
-        session.addEventListener('end', () => {
+          const session = await navigator.xr.requestSession('immersive-ar', {
+            requiredFeatures: ['hit-test', 'local-floor']
+          });
+          
+          renderer.xr.setSession(session);
+          
+          session.addEventListener('end', () => {
+            uiLayer.style.display = 'flex';
+            hint.style.display = 'none';
+            if (placedModel) { scene.remove(placedModel); placedModel = null; }
+          });
+
+          renderer.setAnimationLoop(onXRFrame);
+        } catch (err) {
+          console.error(err);
+          alert('خطا در WebXR: ' + err.message);
           uiLayer.style.display = 'flex';
-          hint.style.display = 'none';
-          if (placedModel) { scene.remove(placedModel); placedModel = null; }
-        });
-      } catch (err) {
-        console.error(err);
-        alert('خطا در راه‌اندازی AR: ' + err.message);
-        uiLayer.style.display = 'flex';
+        }
+      } else {
+        // حالت پشتیبان (سنسور)
+        startFallback();
       }
     });
 
     // ==========================================
-    // حلقه رندر (WebXR)
+    // حلقه رندر WebXR (Hit Test)
     // ==========================================
-    renderer.setAnimationLoop((timestamp, frame) => {
+    function onXRFrame(timestamp, frame) {
       if (frame) {
-        // مدیریت Hit Test
         if (!hitTestSourceRequested) {
           frame.session.requestReferenceSpace('viewer').then((referenceSpace) => {
             frame.session.requestHitTestSource({ space: referenceSpace }).then((source) => {
@@ -249,7 +358,6 @@
           if (hitTestResults.length) {
             const hit = hitTestResults[0];
             const pose = hit.getPose(referenceSpace);
-
             reticle.visible = true;
             reticle.matrix.fromArray(pose.transform.matrix);
           } else {
@@ -258,33 +366,25 @@
         }
       }
 
-      // رندر صحنه
       renderer.render(scene, camera);
-    });
+    }
 
     // ==========================================
-    // لمس صفحه برای قرار دادن مدل
+    // لمس برای قرار دادن مدل (WebXR)
     // ==========================================
     renderer.domElement.addEventListener('pointerdown', (e) => {
-      if (reticle.visible && loadedModel) {
-        // اگر مدلی قبلاً قرار داده شده، حذفش کن
-        if (placedModel) {
-          scene.remove(placedModel);
-        }
+      if (isWebXRSupported && reticle.visible && loadedModel) {
+        if (placedModel) scene.remove(placedModel);
         
-        // کلون کردن مدل و قرار دادن در مکان جدید
         placedModel = loadedModel.clone();
-        
-        // استخراج موقعیت از reticle
         placedModel.position.setFromMatrixPosition(reticle.matrix);
         placedModel.quaternion.setFromRotationMatrix(reticle.matrix);
-        
         scene.add(placedModel);
       }
     });
 
     // ==========================================
-    // مدیریت ریسایز
+    // ریسایز
     // ==========================================
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
